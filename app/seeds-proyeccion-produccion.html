@@ -859,8 +859,9 @@ function renderConsolidated(){
   const curRev=sumQ(all,prev||q),base=sumQ(all,q);const g=growth(),target=curRev*(1+g/100);
   const order=[...people(),'Sin asignar'];
   const rows=[];let tExist=0,tLogo=0,tExt=0,tNewQ=0,tChurn=0;const allLogos=[];const allNew=[];
-  order.forEach(o=>{const list=contractsFor(o,act);const stO=getState(o);
-    if(!list.length && !(stO.newLines&&stO.newLines.length))return;
+  order.forEach(o=>{const list=contractsFor(o,act);const sList=salesContractsFor(o,act);const stO=getState(o);
+    const hasNew=!!(stO.newLines&&stO.newLines.length);
+    if(!list.length && !sList.length && !hasNew)return;
     const b=sumQ(list,q);const cur=sumQ(list,prev||q);
     const ending=endingCandidates(list,q,prev);
     const save=window.__ctx;window.__ctx={o,q,ending,list};const ext=extExpected(o);const chn=totalChurn(o,b);window.__ctx=save;
@@ -871,36 +872,71 @@ function renderConsolidated(){
       cuenta:l.isNew?(l.newName||'cuenta nueva'):l.account,tipo:l.isNew?'Logo nuevo':'Existente',
       rol:l.rol||'a definir',area:l.area||'a definir',qty:+l.qty,ticket:+l.ticket,dur:+l.dur,
       tcv:(+l.qty)*(+l.ticket)*(+l.dur)}));
-    rows.push({o,accts:acctsOf(o,act).size,cur,base:b,ext,churn:chn,
-      existTCV:nb.existTCV,logoTCV:nb.logoTCV,retQ:b+ext+nb.existQ+nb.logoQ-chn,target:cur*(1+g/100),
+    rows.push({o,inSales:sList.length>0||hasNew,inCS:list.length>0,
+      salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
+      cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
       nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
+  const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
+  const nm=o=>o.replace(' (Mono)','');
+  // proyectado + meta en la misma tabla: la meta muestra ✓ o lo que falta
+  const metaTd=(meta,proj)=>{if(!meta)return `<td class="num"><span class="muted">sin meta</span></td>`;
+    const ok=proj>=meta;return `<td class="num" style="color:${ok?'var(--green)':'var(--red)'}">${fmt(meta)} ${ok?'✓':'('+fmt(proj-meta)+')'}</td>`;};
+  const pctOf=(a,b)=>b?Math.round(a/b*100)+'%':'—';
   let html=`<h2><span class="n">3</span>Consolidado · ${q.label}</h2>
-    <p class="sub">${act.size} cuentas activas en ${rows.length} carteras. Meta de retención +${g}%.</p>
-    <div class="section-note">Resumen de todos (solo lectura). <b>Para proyectar, entrá a la pestaña de un comercial</b>. Lo que cada uno carga se suma acá solo.</div>
+    <p class="sub">${act.size} cuentas activas · ${salesRows.length} en ventas y ${csRows.length} en Customer Success. Meta de retención +${g}%.</p>
+    <div class="section-note">Resumen de todos (solo lectura). <b>Para proyectar, entrá a la pestaña de cada persona</b>. Lo que cada uno carga se suma acá solo.</div>
     <div class="row-actions" style="margin-top:12px"><button class="btn primary" id="cons-exp">⬇ Exportar Excel (Consolidado + 1 pestaña por comercial)</button></div>
     <div class="kpis" style="margin-top:14px">
       ${kpi('Nuevas ventas · existentes',fmt(tExist),'TCV proyectado','up')}
       ${kpi('Nuevas ventas · logos',fmt(tLogo),allLogos.length+' logos nuevos','up')}
       ${kpi('Extensiones',fmt(tExt),'esperado ponderado','flat')}
       ${kpi('Retención Q vs meta',fmt(totRetQ),pct2(totRetQ,target),totRetQ>=target?'up':'down')}
-    </div>
-    <label class="fld" style="margin:20px 0 10px">Desglose por comercial</label>
+    </div>`;
+  // ---- Equipo de Ventas: nuevas ventas (existentes + logos), con sus metas ----
+  let sE=0,sL=0,sQ=0,mE=0,mL=0,sA=0;
+  html+=`<label class="fld" style="margin:20px 0 10px">Equipo de Ventas · nuevas ventas</label>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>Comercial</th><th class="num">Ctas</th>
-      <th class="num">N. ventas existentes (TCV)</th><th class="num">N. ventas logos (TCV)</th>
-      <th class="num">Extensiones</th><th class="num">Retención Q</th><th class="num">vs meta</th>
+      <th>Vendedor</th><th class="num">Ctas</th>
+      <th class="num">Existentes (TCV)</th><th class="num">Meta</th>
+      <th class="num">Logos (TCV)</th><th class="num">Meta</th>
+      <th class="num">Total TCV</th><th class="num">Impacto ${q.label}</th>
     </tr></thead><tbody>`;
-  rows.sort((a,b)=>(b.existTCV+b.logoTCV)-(a.existTCV+a.logoTCV)).forEach(r=>{const ok=r.retQ>=r.target;
-    html+=`<tr><td><b>${r.o.replace(' (Mono)','')}</b></td><td class="num">${r.accts}</td>
-      <td class="num">${fmt(r.existTCV)}</td><td class="num">${fmt(r.logoTCV)}</td>
-      <td class="num">${fmt(r.ext)}</td><td class="num"><b>${fmt(r.retQ)}</b></td>
-      <td class="num" style="color:${ok?'var(--green)':'var(--red)'}">${ok?'✓':fmt(r.retQ-r.target)}</td></tr>`;});
-  html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL</b></td><td class="num">${act.size}</td>
-      <td class="num"><b>${fmt(tExist)}</b></td><td class="num"><b>${fmt(tLogo)}</b></td>
-      <td class="num"><b>${fmt(tExt)}</b></td><td class="num"><b>${fmt(totRetQ)}</b></td>
-      <td class="num" style="color:${totRetQ>=target?'var(--green)':'var(--red)'}">${totRetQ>=target?'✓':fmt(totRetQ-target)}</td></tr>`;
-  html+=`</tbody></table></div>`;
+  salesRows.sort((a,b)=>(b.existTCV+b.logoTCV)-(a.existTCV+a.logoTCV)).forEach(r=>{
+    sE+=r.existTCV;sL+=r.logoTCV;sQ+=r.newQ;mE+=r.obj.existing||0;mL+=r.obj.logos||0;sA+=r.salesAccts;
+    html+=`<tr><td><b>${nm(r.o)}</b></td><td class="num">${r.salesAccts}</td>
+      <td class="num">${fmt(r.existTCV)}</td>${metaTd(r.obj.existing||0,r.existTCV)}
+      <td class="num">${fmt(r.logoTCV)}</td>${metaTd(r.obj.logos||0,r.logoTCV)}
+      <td class="num"><b>${fmt(r.existTCV+r.logoTCV)}</b></td><td class="num">${fmt(r.newQ)}</td></tr>`;});
+  if(!salesRows.length)html+=`<tr><td colspan="8"><span class="muted">Sin vendedores con cuentas o ventas proyectadas.</span></td></tr>`;
+  html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL VENTAS</b></td><td class="num">${sA}</td>
+      <td class="num"><b>${fmt(sE)}</b></td>${metaTd(mE,sE)}
+      <td class="num"><b>${fmt(sL)}</b></td>${metaTd(mL,sL)}
+      <td class="num"><b>${fmt(sE+sL)}</b></td><td class="num"><b>${fmt(sQ)}</b></td></tr>
+    </tbody></table></div>`;
+  // ---- Equipo de Customer Success: base, extensiones, bajas y NRR, con su meta ----
+  let cC=0,cB=0,cX=0,cH=0,cN=0,mN=0,cA=0;
+  html+=`<label class="fld" style="margin:24px 0 10px">Equipo de Customer Success · retención</label>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>CS</th><th class="num">Ctas</th>
+      <th class="num">Revenue ${(prev||q).label}</th><th class="num">Base ${q.label}</th>
+      <th class="num">+ Extensiones</th><th class="num">− Bajas</th>
+      <th class="num">NRR proy.</th><th class="num">Meta NRR</th><th class="num">NRR %</th>
+    </tr></thead><tbody>`;
+  csRows.sort((a,b)=>b.cur-a.cur).forEach(r=>{
+    cC+=r.cur;cB+=r.base;cX+=r.ext;cH+=r.churn;cN+=r.nrrProj;mN+=r.obj.nrr||0;cA+=r.csAccts;
+    html+=`<tr><td><b>${nm(r.o)}</b></td><td class="num">${r.csAccts}</td>
+      <td class="num">${fmt(r.cur)}</td><td class="num">${fmt(r.base)}</td>
+      <td class="num">${fmt(r.ext)}</td><td class="num" style="color:var(--red)">${r.churn>0?'-'+fmt(r.churn):'$0'}</td>
+      <td class="num"><b>${fmt(r.nrrProj)}</b></td>${metaTd(r.obj.nrr||0,r.nrrProj)}<td class="num">${pctOf(r.nrrProj,r.cur)}</td></tr>`;});
+  if(!csRows.length)html+=`<tr><td colspan="9"><span class="muted">Sin carteras de retención.</span></td></tr>`;
+  html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL CS</b></td><td class="num">${cA}</td>
+      <td class="num"><b>${fmt(cC)}</b></td><td class="num"><b>${fmt(cB)}</b></td>
+      <td class="num"><b>${fmt(cX)}</b></td><td class="num" style="color:var(--red)"><b>${cH>0?'-'+fmt(cH):'$0'}</b></td>
+      <td class="num"><b>${fmt(cN)}</b></td>${metaTd(mN,cN)}<td class="num"><b>${pctOf(cN,cC)}</b></td></tr>
+    </tbody></table></div>
+    <p class="muted" style="margin-top:6px;font-size:11.5px">NRR = base + extensiones + ventas a cuentas existentes − bajas (sin logos nuevos). Las cuentas sin CS las cubre el vendedor, por eso puede aparecer en las dos tablas.</p>
+`;
   // cuentas y duplas (solo con revenue de la plataforma, que trae vendedor y CS por cuenta)
   if(Object.keys(DUPLA).length){
     const ref=prev||q;
@@ -914,23 +950,6 @@ function renderConsolidated(){
       <td class="num">${fmt(x.rev)}</td><td class="num">${fmt(x.base)}</td><td class="num">${x.n}</td></tr>`;});
     html+='</tbody></table></div></details>';
   }
-  // objetivos vs proyectado
-  const cell=(meta,proj)=>{ if(!meta)return `<td class="num">${fmt(proj)}</td><td class="num"><span class="muted">sin meta</span></td>`;
-    const ok=proj>=meta;return `<td class="num">${fmt(proj)}</td><td class="num" style="color:${ok?'var(--green)':'var(--red)'}">${fmt(meta)} ${ok?'✓':'('+fmt(proj-meta)+')'}</td>`;};
-  let oExist=0,oLogos=0,oNrr=0;rows.forEach(r=>{oExist+=r.obj.existing||0;oLogos+=r.obj.logos||0;oNrr+=r.obj.nrr||0;});
-  html+=`<label class="fld" style="margin:24px 0 10px">Objetivos vs proyectado</label>
-    <div style="overflow-x:auto"><table><thead><tr>
-      <th>Comercial</th>
-      <th class="num">N. exist. proy.</th><th class="num">meta</th>
-      <th class="num">Logos proy.</th><th class="num">meta</th>
-      <th class="num">NRR proy.</th><th class="num">meta NRR</th>
-    </tr></thead><tbody>`;
-  rows.forEach(r=>{html+=`<tr><td><b>${r.o.replace(' (Mono)','')}</b></td>
-      ${cell(r.obj.existing||0,r.existTCV)}${cell(r.obj.logos||0,r.logoTCV)}${cell(r.obj.nrr||0,r.nrrProj)}</tr>`;});
-  const tNrrProj=base+tExt+rows.reduce((a,r)=>a+(r.nrrProj-(r.base+r.ext)),0); // = base+ext+Σ existQ
-  html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL</b></td>
-      ${cell(oExist,tExist)}${cell(oLogos,tLogo)}${cell(oNrr,rows.reduce((a,r)=>a+r.nrrProj,0))}</tr>`;
-  html+=`</tbody></table></div>`;
   // Brief Talent Acquisition (todos los nuevos)
   window.__briefTA={rows:allNew.slice(),q:q.label};
   if(allNew.length){
