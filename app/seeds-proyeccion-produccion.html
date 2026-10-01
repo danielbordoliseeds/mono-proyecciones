@@ -216,22 +216,8 @@ details.howto b{color:var(--ink)}
     </div>
     <div class="ctabs" id="ctabs"></div>
     <div style="margin-top:18px;border-top:1px dashed var(--g300);padding-top:16px">
-      <label class="fld">Pipeline abierto de HubSpot (opcional)</label>
-      <p class="muted" style="margin:-2px 0 10px">Exportá tus deals <b>abiertos</b> de HubSpot a CSV y cargalo acá. Aparecen como candidatos en "De dónde sacar nuevos", con la cuenta y el rol ya detectados.</p>
-      <details class="howto">
-        <summary>¿Cómo lo bajo de HubSpot? (paso a paso)</summary>
-        <ol>
-          <li>En HubSpot, andá a <b>CRM › Negocios</b> y poné la vista en <b>lista</b> (no tablero).</li>
-          <li>Filtrá <b>Estado del negocio = Abierto</b> (saca ganados y perdidos). Cada comercial filtra <b>Propietario = su nombre</b> para bajar solo su cartera. Opcional: <b>Fecha de cierre</b> dentro del trimestre.</li>
-          <li>Tocá <b>Editar columnas</b> y dejá visibles al menos: <b>Nombre del negocio</b>, <b>Empresa asociada</b>, <b>Probabilidad de la etapa</b> y <b>Fecha de cierre</b>. HubSpot solo exporta las columnas que están en la vista.</li>
-          <li>Arriba a la derecha de la tabla → <b>Exportar</b>. Formato <b>CSV</b>, dejá tildado <b>"incluir nombre del registro asociado"</b> para que venga la empresa.</li>
-          <li>Te llega un <b>mail con el link de descarga</b> (vence a los 30 días). Bajá el CSV.</li>
-          <li>Arrastralo al recuadro de abajo. 👇</li>
-        </ol>
-      </details>
-      <div id="drop2" style="border:2px dashed var(--g300);border-radius:var(--r-md);padding:18px;text-align:center;cursor:pointer;font-size:13px;font-weight:600;color:var(--g500)">+ Cargar CSV de deals abiertos</div>
-      <input type="file" id="file2" accept=".csv,.xlsx,.xls" style="display:none">
-      <div class="loaded" id="loaded2" style="margin-top:10px">✓ <span id="loaded2-txt"></span></div>
+      <label class="fld">Pipeline de HubSpot</label>
+      <div class="loaded" id="loaded2" style="margin-top:4px">✓ <span id="loaded2-txt"></span></div>
     </div>
   </div>
 
@@ -1342,11 +1328,6 @@ if(drop){drop.onclick=()=>fi.click();fi.onchange=e=>{if(e.target.files[0])readFi
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
 drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTransfer.files[0]);});}
-const drop2=$('#drop2'),fi2=$('#file2');
-if(drop2){drop2.onclick=()=>fi2.click();fi2.onchange=e=>{if(e.target.files[0])readDeals(e.target.files[0]);};
-['dragover','dragenter'].forEach(ev=>drop2.addEventListener(ev,e=>{e.preventDefault();drop2.style.borderColor='var(--green)';}));
-['dragleave','drop'].forEach(ev=>drop2.addEventListener(ev,e=>{e.preventDefault();drop2.style.borderColor='var(--g300)';}));
-drop2.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readDeals(e.dataTransfer.files[0]);});}
 </script>
 <script>
 /* ============================================================
