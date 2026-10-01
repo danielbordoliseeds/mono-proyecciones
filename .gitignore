@@ -2,3 +2,6 @@
 node_modules/
 *.log
 .env
+
+# lo genera app/build.sh (en Netlify, en cada push)
+web/index.html

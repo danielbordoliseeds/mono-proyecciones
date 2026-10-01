@@ -1,4 +1,5 @@
-# Netlify publica la carpeta web/ tal cual (sin build). web/index.html se genera con `bash app/build.sh`.
+# Netlify genera web/index.html desde la plantilla en cada push (app/build.sh) y publica web/.
+# Si el build falla (por ej. un error de sintaxis en la plantilla), no se publica nada y queda la versión anterior.
 [build]
   publish = "web"
-  command = ""
+  command = "bash app/build.sh"

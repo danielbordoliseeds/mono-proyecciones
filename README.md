@@ -23,7 +23,7 @@ vendedor + CS de cada cuenta. El pipeline de HubSpot todavía entra por CSV desd
 app/    → la aplicación (fuente)
   seeds-proyeccion-produccion.html ← plantilla canónica (claves placeholder) — TODA edición va acá
   build.sh                         ← genera web/index.html inyectando la URL y la clave pública
-web/    → LO QUE PUBLICA NETLIFY (ver netlify.toml): index.html generado + favicon.ico
+web/    → LO QUE PUBLICA NETLIFY (ver netlify.toml): favicon.ico + index.html (lo genera el build, no se commitea)
 sync/   → sync nocturno plataforma → Supabase (Lambda en AWS, ver sync/README.md)
 db/     → esquema de Supabase (correr en orden)
   schema.sql            ← base: profiles, projections, revenue_snapshots, RLS, triggers
@@ -37,11 +37,17 @@ V2_SPEC.md → especificación y plan de la v2 (leer esto para continuar el desa
 
 ## Flujo de desarrollo
 
-1. Editar **`app/seeds-proyeccion-produccion.html`** (la plantilla con placeholders), nunca `web/index.html` directo.
-2. `bash app/build.sh` → genera `web/index.html` con la URL y la clave **publishable** de Supabase, chequea que
-   solo cambien esas 2 líneas y que los `<script>` parseen.
-3. Commit + push a `main` → Netlify lo publica solo (misma URL). **No** arrastrar zips a Netlify: el próximo
-   push los pisa.
+El único archivo que se edita es **`app/seeds-proyeccion-produccion.html`** (la plantilla, con las claves en
+placeholder). `web/index.html` no está en el repo: lo genera Netlify en cada push con `app/build.sh`, que inyecta
+la URL y la clave **publishable** de Supabase, chequea que solo cambien esas 2 líneas y que los `<script>`
+parseen. Si algo falla, Netlify no publica y queda la versión anterior.
+
+- **Desde el navegador:** en GitHub abrir `app/seeds-proyeccion-produccion.html` → lápiz (*Edit*) → editar →
+  *Commit changes* a `main`. En 1–2 minutos está publicado (misma URL).
+- **Desde tu máquina:** `git pull`, editar la plantilla, probar con `bash app/build.sh` (genera
+  `web/index.html` local), y `git push` a `main`.
+- Antes de editar, `git pull` (o editar en GitHub), así no se pisan cambios entre quienes editan.
+- **No** arrastrar zips a Netlify: el próximo push los pisa.
 
 ## Notas importantes
 
