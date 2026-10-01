@@ -1,5 +1,5 @@
-# Netlify genera web/index.html desde la plantilla en cada push (app/build.sh) y publica web/.
-# Si el build falla (por ej. un error de sintaxis en la plantilla), no se publica nada y queda la versión anterior.
+# La publicación la hace la GitHub Action .github/workflows/deploy.yml (genera web/ con app/build.sh y la sube
+# con la CLI). Esto queda por si algún día el sitio se linkea al repo desde Netlify: hace lo mismo.
 [build]
   publish = "web"
   command = "bash app/build.sh"

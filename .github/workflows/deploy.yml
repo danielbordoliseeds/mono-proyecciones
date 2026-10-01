@@ -1,0 +1,36 @@
+# Publica la web en Netlify en cada push a main: genera web/index.html desde la plantilla (app/build.sh)
+# y lo sube al sitio con la CLI de Netlify. Si el build falla, no se publica y queda la versión anterior.
+# Necesita: secret NETLIFY_AUTH_TOKEN (token personal de Netlify) y variable NETLIFY_SITE_ID (Site ID del sitio).
+name: Publicar en Netlify
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "web/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: netlify-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generar web/index.html
+        run: bash app/build.sh
+      - name: Publicar
+        if: env.NETLIFY_AUTH_TOKEN != '' && env.NETLIFY_SITE_ID != ''
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message || 'manual' }}
+        run: npx --yes netlify-cli deploy --prod --dir web --no-build --site "$NETLIFY_SITE_ID" --message "${GITHUB_SHA::7} ${COMMIT_MSG%%$'\n'*}"
+      - name: Falta configurar Netlify
+        if: env.NETLIFY_AUTH_TOKEN == '' || env.NETLIFY_SITE_ID == ''
+        run: echo "::warning::No se publicó - falta el secret NETLIFY_AUTH_TOKEN o la variable NETLIFY_SITE_ID."

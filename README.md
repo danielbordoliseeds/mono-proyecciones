@@ -12,7 +12,7 @@ Este repo contiene la **v1 en producción** y la **especificación de la v2** (v
 
 App web de un solo archivo (`web/index.html`) que corre sobre:
 - **Supabase** — autenticación (magic-link por email) + base de datos (proyecciones, objetivos, snapshots de revenue).
-- **Netlify** — hosting del sitio estático, conectado a este repo (cada push a `main` se publica solo).
+- **Netlify** — hosting del sitio estático. Cada push a `main` lo publica la GitHub Action `.github/workflows/deploy.yml`.
 
 El revenue ya **no se sube a mano**: el sync nocturno (`sync/`) lo trae de la plataforma con la dupla
 vendedor + CS de cada cuenta. El pipeline de HubSpot todavía entra por CSV desde la app. Detalle en `V2_SPEC.md`.
@@ -38,9 +38,9 @@ V2_SPEC.md → especificación y plan de la v2 (leer esto para continuar el desa
 ## Flujo de desarrollo
 
 El único archivo que se edita es **`app/seeds-proyeccion-produccion.html`** (la plantilla, con las claves en
-placeholder). `web/index.html` no está en el repo: lo genera Netlify en cada push con `app/build.sh`, que inyecta
+placeholder). `web/index.html` no está en el repo: lo genera la GitHub Action en cada push con `app/build.sh`, que inyecta
 la URL y la clave **publishable** de Supabase, chequea que solo cambien esas 2 líneas y que los `<script>`
-parseen. Si algo falla, Netlify no publica y queda la versión anterior.
+parseen, y lo sube a Netlify. Si algo falla, no se publica y queda la versión anterior.
 
 - **Desde el navegador:** en GitHub abrir `app/seeds-proyeccion-produccion.html` → lápiz (*Edit*) → editar →
   *Commit changes* a `main`. En 1–2 minutos está publicado (misma URL).
@@ -58,9 +58,16 @@ parseen. Si algo falla, Netlify no publica y queda la versión anterior.
 - Login = magic-link por email. La fila en `profiles` se crea al primer login; recién ahí se le
   puede asignar rol por SQL.
 
-## Conectar Netlify al repo (una vez)
+## Publicación (GitHub Action → Netlify)
 
-En Netlify, sitio **illustrious-pothos-8c3ca9** → *Site configuration → Build & deploy → Link repository*:
-GitHub → `danielbordoliseeds/mono-proyecciones` → rama `main`. La carpeta a publicar (`web`) y el build vacío
-ya vienen de `netlify.toml`. Desde ahí cada push a `main` se publica solo y Netlify guarda el historial de
-versiones (se puede volver a una anterior desde *Deploys*).
+`.github/workflows/deploy.yml` corre en cada push a `main` (o a mano desde *Actions → Publicar en Netlify → Run
+workflow*): genera `web/` y la sube al sitio **illustrious-pothos-8c3ca9** con la CLI de Netlify. No hace falta
+linkear el sitio al repo en Netlify (con el repo en una cuenta personal, Netlify no lo ve desde la cuenta de otro).
+
+Configuración (una vez, en GitHub → *Settings → Secrets and variables → Actions*):
+- Secret **`NETLIFY_AUTH_TOKEN`**: token personal de Netlify (*User settings → Applications → Personal access
+  tokens*). Es secreto: cargarlo directo acá, nunca por chat.
+- Variable **`NETLIFY_SITE_ID`**: Site ID del sitio (*Site configuration → General → Site details*).
+
+Sin esos dos, el workflow genera la web pero no publica (deja un aviso). Cada publicación queda en *Deploys* de
+Netlify; desde ahí se puede volver a una versión anterior.
