@@ -282,7 +282,10 @@ function setMark(c,patch){const k=ckey(c);const m=Object.assign({},markOf(c),pat
 function extOf(c,q){const m=markOf(c);const li=lastIdx(c);
   const tk=m.extTicket!=null?m.extTicket:c.series[li];const du=m.extDur!=null?m.extDur:6;
   const sStart=m.extStart!=null?m.extStart:extStartDefault(c,q);const months=Math.max(0,Math.min(du,3-sStart));
-  return{on:!m.unchecked,tk,du,sStart,aporta:m.unchecked?0:tk*months};}
+  // por defecto NO se asume renovación: hay que tildarla a mano para que cuente.
+  // si ya se tocó antes (unchecked true o false explícito) se respeta tal cual quedó guardado.
+  const on=m.unchecked===undefined?false:!m.unchecked;
+  return{on,tk,du,sStart,aporta:on?tk*months:0};}
 function churnOf(c,q){const m=markOf(c);if(m.churn==null)return null;
   const b=+m.churn||0;const qser=q.idx.map(i=>c.series[i]||0);const total=qser.reduce((a,x)=>a+x,0);
   let kept=0;for(let j=0;j<3;j++){if(j<Math.floor(b))kept+=qser[j];else if(j===Math.floor(b)&&(b-Math.floor(b))>=0.5)kept+=qser[j]*0.5;}
@@ -689,7 +692,7 @@ function showSub(which){
   if(which==='ext'){
     if(!ending.length){L.innerHTML='<div class="empty">No hay contratos terminando en este trimestre en esta cartera.</div>';recalc();return;}
     ending.sort((a,b)=>b.series[lastIdx(b)]-a.series[lastIdx(a)]);
-    let h=`<p class="muted" style="margin-bottom:10px">Contratos que vencen en el trimestre o que ya vencieron en el anterior y podés renovar hacia este Q. Destildá los que no extendés. Editá el <b>ticket</b>, elegí la <b>duración</b> y <b>cuándo arranca</b> la extensión. "Aporta Q" = ticket × meses de la extensión que caen en este trimestre (según el inicio).</p>
+    let h=`<p class="muted" style="margin-bottom:10px">Contratos que vencen en el trimestre o que ya vencieron en el anterior y podés renovar hacia este Q. <b>Tildá los que sí extendés</b> — por defecto no cuentan como proyectado hasta que lo confirmes. Editá el <b>ticket</b>, elegí la <b>duración</b> y <b>cuándo arranca</b> la extensión. "Aporta Q" = ticket × meses de la extensión que caen en este trimestre (según el inicio).</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Ext.</th><th>Cuenta · profesional</th><th>Modelo</th><th>Vence</th><th class="num">Ticket</th><th class="num">Dur. (m)</th><th>Inicio</th><th class="num">Aporta Q</th></tr></thead><tbody>`;
     ending.forEach(c=>{const li=lastIdx(c);const k=ckey(c);const endIdx=q.idx.indexOf(li);const endNow=endIdx===0;
       const ex=extOf(c,q);const tkv=ex.tk,duv=ex.du,startV=ex.sStart;
