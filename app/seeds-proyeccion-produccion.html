@@ -199,6 +199,7 @@ details.howto b{color:var(--ink)}
     <h2><span class="n">1</span>Revenue</h2>
     <p class="sub">Se sincroniza solo con la plataforma todas las noches (contratos firmados, ganancia mensual en USD). Ya no hace falta cargar el export de Power BI. Solo se consideran cuentas que facturan en el trimestre base.</p>
     <div class="loaded" id="loaded">✓ <span id="loaded-txt"></span></div>
+    <div class="kpis hidden" id="revenue-kpis" style="margin-top:14px"></div>
   </div>
 
   <!-- 2. CONFIG -->
@@ -453,11 +454,11 @@ function init(){
   const now=new Date();const tgt=new Date(now.getFullYear(),now.getMonth()+(now.getMonth()%3===2?1:0),1);
   const nowKey=`${tgt.getFullYear()}-${String(tgt.getMonth()+1).padStart(2,'0')}`;const curQ=QUARTERS.find(q=>q.idx.some(i=>MONTHS[i].key===nowKey));
   qsel.value=(curQ&&[...qsel.options].some(op=>op.value===curQ.id)?curQ.id:(QUARTERS[Math.max(1,QUARTERS.length-2)]||{}).id)||qsel.value;
-  qsel.onchange=()=>{MARKS={};MARKS_DIRTY.clear();buildTabs();render();refreshDeadlineCtrl();
+  qsel.onchange=()=>{MARKS={};MARKS_DIRTY.clear();buildTabs();render();refreshDeadlineCtrl();refreshRevenueCard();
     if(typeof loadMarks==='function')loadMarks().then(()=>render());
     if(typeof loadDeadlines==='function')loadDeadlines().then(()=>{refreshDeadlineCtrl();render();});};
   $('#growth').oninput=render;{const cp=$('#churnpct');if(cp)cp.oninput=render;}
-  setupDeadlineCtrl();refreshDeadlineCtrl();
+  setupDeadlineCtrl();refreshDeadlineCtrl();refreshRevenueCard();
   // aterrizar en una pestaña con motor (no en el consolidado de solo lectura)
   const act=activeAccounts();const order=[...people(),'Sin asignar'];
   const withAccts=order.filter(o=>acctsOf(o,act).size>0);
@@ -466,7 +467,21 @@ function init(){
   else if(role==='comercial'&&CURRENT_USER.comercial_name){ACTIVE=CURRENT_USER.comercial_name;}
   else{ACTIVE=withAccts.find(o=>o.includes('Mono'))||withAccts[0]||'__cons__';}
   buildTabs();render();
-  if(typeof loadProjections==='function')loadProjections().then(()=>{refreshDeadlineCtrl();render();});
+  if(typeof loadProjections==='function')loadProjections().then(()=>{refreshDeadlineCtrl();refreshRevenueCard();render();});
+}
+// resumen de "real de la plataforma" a nivel compañía, siempre visible arriba de todo (card 1, Revenue)
+function refreshRevenueCard(){
+  const el=$('#revenue-kpis');if(!el)return;
+  if(!QUARTERS.length){el.classList.add('hidden');return;}
+  const q=projQ();if(!q){el.classList.add('hidden');return;}
+  const prev=baseQ();const act=activeAccounts();const all=contractsFor('__cons__',act);
+  const rs=realSales(all,q);const rx=realExtensions(all,q,prev);const closed=isQuarterClosed(q);
+  el.classList.remove('hidden');
+  el.innerHTML=`
+    ${kpi('Net revenue real '+q.label,fmt(sumQ(all,q)),closed?'resultado final':'a la fecha · se va completando solo','flat')}
+    ${kpi('Ventas realizadas',fmt(rs.total),'existentes + logos, ya facturando','up')}
+    ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
+    ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}`;
 }
 // fecha límite por trimestre: solo el admin la ve/edita; congela la proyección (solo visual) pasada esa fecha
 function refreshDeadlineCtrl(){
