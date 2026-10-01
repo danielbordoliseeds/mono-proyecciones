@@ -1,6 +1,6 @@
 # Publica la web en Netlify en cada push a main: genera web/index.html desde la plantilla (app/build.sh)
 # y lo sube al sitio con la CLI de Netlify. Si el build falla, no se publica y queda la versión anterior.
-# Necesita: secret NETLIFY_AUTH_TOKEN (token personal de Netlify) y variable NETLIFY_SITE_ID (Site ID del sitio).
+# Necesita: secret NETLIFY_AUTH_TOKEN o NETLIFY (token personal de Netlify) y variable NETLIFY_SITE_ID (Site ID del sitio).
 name: Publicar en Netlify
 
 on:
@@ -17,7 +17,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY }}
       NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
     steps:
       - uses: actions/checkout@v4

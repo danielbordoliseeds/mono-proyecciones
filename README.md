@@ -65,7 +65,7 @@ workflow*): genera `web/` y la sube al sitio **illustrious-pothos-8c3ca9** con l
 linkear el sitio al repo en Netlify (con el repo en una cuenta personal, Netlify no lo ve desde la cuenta de otro).
 
 Configuración (una vez, en GitHub → *Settings → Secrets and variables → Actions*):
-- Secret **`NETLIFY_AUTH_TOKEN`**: token personal de Netlify (*User settings → Applications → Personal access
+- Secret **`NETLIFY_AUTH_TOKEN`** (o **`NETLIFY`**, el nombre con el que se cargó): token personal de Netlify (*User settings → Applications → Personal access
   tokens*). Es secreto: cargarlo directo acá, nunca por chat.
 - Variable **`NETLIFY_SITE_ID`**: Site ID del sitio (*Site configuration → General → Site details*).
 
