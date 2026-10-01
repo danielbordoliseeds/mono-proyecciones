@@ -207,8 +207,10 @@ details.howto b{color:var(--ink)}
     <p class="sub">El trimestre y la meta aplican a todas las pestañas.</p>
     <div class="controls">
       <div><label class="fld">Trimestre a proyectar</label><select id="sel-q"></select></div>
+      <div id="admin-config" class="hidden" style="display:contents">
       <div><label class="fld">Meta de crecimiento vs Q anterior</label><div class="input-mini"><input type="number" id="growth" value="15" min="0" max="100" step="1"><span>%</span></div></div>
       <div><label class="fld">Baja anticipada (prom. año)</label><div class="input-mini"><input type="number" id="churnpct" value="1.7" min="0" max="100" step="0.1"><span>%</span></div></div>
+      </div>
       <div id="deadline-ctrl" class="hidden"><label class="fld">Fecha límite de este Q (congela la proyección)</label>
         <div class="input-mini"><input type="date" id="deadline-date"><button class="btn ghost sm" id="deadline-save" style="margin-left:6px">Guardar</button><button class="btn ghost sm" id="deadline-clear" style="margin-left:4px">Quitar</button></div>
         <span class="muted" id="deadline-flag" style="font-size:11.5px"></span>
@@ -236,6 +238,7 @@ let DEADLINES={};
 let CURRENT_USER=null, SB=null;
 const STATE={}; // per-comercial {ext:{key:{prob}}, unchecked:Set, newLines:[]}
 let ACTIVE='__cons__';
+let ACCT_FILTER=''; // filtro de cuenta dentro de la pestaña de una persona (extensiones/bajas/activos)
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
 const OWNERS={
@@ -470,6 +473,8 @@ function refreshDeadlineCtrl(){
   const el=$('#deadline-ctrl');if(!el)return;
   const isAdmin=(CURRENT_USER&&CURRENT_USER.role)==='admin';
   el.classList.toggle('hidden',!isAdmin);
+  // los comerciales solo eligen el trimestre: meta de crecimiento, baja anticipada y fecha límite son del admin
+  const ac=$('#admin-config');if(ac)ac.classList.toggle('hidden',!isAdmin);
   if(!isAdmin)return;
   const q=projQ();const inp=$('#deadline-date');if(!q||!inp)return;
   const cur=DEADLINES[q.id];inp.value=cur?new Date(cur).toISOString().slice(0,10):'';
@@ -503,7 +508,7 @@ function buildTabs(){
     const t=document.createElement('div');
     t.className='ctab'+(ACTIVE===o?' active':'')+(o==='Sin asignar'?' warn':'');
     t.innerHTML=`${o.replace(' (Mono)','')} <span class="badge">${accts.size}</span>`;
-    t.onclick=()=>{ACTIVE=o;render();};ct.appendChild(t);
+    t.onclick=()=>{ACTIVE=o;ACCT_FILTER='';render();};ct.appendChild(t);
   });
 }
 
@@ -584,7 +589,15 @@ function renderComercial(o){
     html+=`</tbody></table></details>`;
   }
 
-  html+=`<div class="tabs" style="margin-top:18px">
+  if(!accts.includes(ACCT_FILTER))ACCT_FILTER='';
+  html+=`<div style="margin:16px 0 4px;display:flex;align-items:center;gap:8px">
+    <label class="fld" style="margin:0">Filtrar por cuenta</label>
+    <select id="acct-filter" style="max-width:280px">
+      <option value="">Todas las cuentas (${accts.length})</option>
+      ${accts.map(a=>`<option value="${a}" ${ACCT_FILTER===a?'selected':''}>${a}</option>`).join('')}
+    </select>
+  </div>
+  <div class="tabs" style="margin-top:14px">
     <div class="tab active" data-t="ext">Extensiones (${viewEnding.length})</div>
     <div class="tab" data-t="baja">Bajas</div>
     <div class="tab" data-t="ong">Contratos activos</div>
@@ -619,6 +632,8 @@ function renderComercial(o){
   </div></div>`;
   $('#panel').innerHTML=html;
   window.__ctx={o,q,prev,list,salesList,ending,viewList,viewEnding,accts,target,curRev,base,avg,avgClient};
+  const af=$('#acct-filter');if(af)af.onchange=e=>{ACCT_FILTER=e.target.value;
+    const cur=$$('#panel .tab').find(t=>t.classList.contains('active'));showSub(cur?cur.dataset.t:(salesOnly?'opp':'ext'));};
   // sub-tabs
   $$('#panel .tab').forEach(t=>t.onclick=()=>{$$('#panel .tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');showSub(t.dataset.t);});
   const firstSub=salesOnly?'opp':'ext';
@@ -637,7 +652,9 @@ function renderComercial(o){
 }
 
 function showSub(which){
-  const L=$('#panL');const{o,q,prev,accts,list}=window.__ctx;const viewList=window.__ctx.viewList||list,ending=window.__ctx.viewEnding||window.__ctx.ending;const st=getState(o);
+  const L=$('#panL');const{o,q,prev,accts,list}=window.__ctx;const st=getState(o);
+  let viewList=window.__ctx.viewList||list,ending=window.__ctx.viewEnding||window.__ctx.ending;
+  if(ACCT_FILTER){viewList=viewList.filter(c=>c.client===ACCT_FILTER);ending=ending.filter(c=>c.client===ACCT_FILTER);}
   const frozen=!!(DEADLINES[q.id]&&new Date()>new Date(DEADLINES[q.id]));
   if(which==='ong'){
     const refIdx=(prev||q).idx[2];
@@ -716,7 +733,7 @@ function showSub(which){
       ents.forEach(([name,tk])=>{ref+=`<tr><td>${name}</td><td class="num">${cnt[name]||0}</td><td class="num">${fmt(tk)}</td></tr>`;});
       ref+='</tbody></table></details>';
       L.insertAdjacentHTML('beforeend',ref);}
-    $('#nb-add').onclick=()=>{const tmap=acctTicketMap();const a0=accts[0]||'';const dt=Math.round(tmap[a0]||(window.__ctx&&window.__ctx.avg)||0)||1200;st.newLines.push({account:a0,isNew:false,newName:'',qty:1,ticket:dt,dur:6,start:0,area:'',rol:''});renderNbLines();recalc();};
+    $('#nb-add').onclick=()=>{const tmap=acctTicketMap();const a0=(ACCT_FILTER&&accts.includes(ACCT_FILTER))?ACCT_FILTER:(accts[0]||'');const dt=Math.round(tmap[a0]||(window.__ctx&&window.__ctx.avg)||0)||1200;st.newLines.push({account:a0,isNew:false,newName:'',qty:1,ticket:dt,dur:6,start:0,area:'',rol:''});renderNbLines();recalc();};
   }
   else if(which==='opp'){
     const ops=opportunities(window.__ctx.salesList,q,prev);
@@ -810,12 +827,11 @@ function renderNbLines(){
   if(!st.newLines.length){c.innerHTML='<div class="empty" style="padding:14px">Sin líneas. Agregá una para proyectar nuevos.</div>';return;}
   st.newLines.forEach((l,i)=>{
     const div=document.createElement('div');div.className='nb-line';
-    const opts=accts.map(a=>`<option ${!l.isNew&&l.account===a?'selected':''}>${a}</option>`).join('');
+    const opts=`<option value="__new__" ${l.isNew?'selected':''}>➕ Logo nuevo (escribir empresa)</option>`
+      +accts.map(a=>`<option ${!l.isNew&&l.account===a?'selected':''}>${a}</option>`).join('');
     div.innerHTML=`
-      <div>${l.isNew
-        ?`<input type="text" placeholder="Nombre cuenta nueva" value="${l.newName||''}" class="nb-newname">`
-        :`<select class="nb-acc">${opts}</select>`}
-        <label style="display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11px;color:var(--g500);font-weight:600"><input type="checkbox" class="nb-isnew" ${l.isNew?'checked':''} style="width:14px;height:14px;accent-color:var(--green)">cuenta nueva</label></div>
+      <div><select class="nb-acc">${opts}</select>
+        ${l.isNew?`<input type="text" placeholder="Nombre de la empresa nueva" value="${l.newName||''}" class="nb-newname" style="margin-top:5px">`:''}</div>
       <div><input type="number" class="nb-qty" value="${l.qty}" min="1"></div>
       <div><div class="input-mini"><span>$</span><input type="number" class="nb-ticket" value="${(+l.ticket)||''}" min="0" step="100" placeholder="completar" style="${(+l.ticket)?'':'border-color:var(--amber);background:#FFFDF5'}"></div></div>
       <div><input type="number" class="nb-dur" value="${l.dur}" min="1" max="24"></div>
@@ -825,8 +841,10 @@ function renderNbLines(){
       <button class="nb-del" title="Eliminar">×</button>`;
     c.appendChild(div);
     const upd=()=>{recalc();};
-    div.querySelector('.nb-isnew').onchange=e=>{l.isNew=e.target.checked;renderNbLines();recalc();};
-    if(div.querySelector('.nb-acc'))div.querySelector('.nb-acc').onchange=e=>{l.account=e.target.value;const tm=acctTicketMap();if(tm[l.account])l.ticket=Math.round(tm[l.account]);renderNbLines();recalc();};
+    div.querySelector('.nb-acc').onchange=e=>{
+      if(e.target.value==='__new__'){l.isNew=true;l.account='';}
+      else{l.isNew=false;l.account=e.target.value;l.newName='';const tm=acctTicketMap();if(tm[l.account])l.ticket=Math.round(tm[l.account]);}
+      renderNbLines();recalc();};
     if(div.querySelector('.nb-newname'))div.querySelector('.nb-newname').oninput=e=>{l.newName=e.target.value;};
     div.querySelector('.nb-qty').oninput=e=>{l.qty=+e.target.value;upd();};
     div.querySelector('.nb-ticket').oninput=e=>{l.ticket=+e.target.value;upd();};
@@ -999,6 +1017,12 @@ function renderConsolidated(){
       ${metaTd(sQ,sR)}</tr>
     </tbody></table></div>
     <p class="muted" style="margin-top:6px;font-size:11.5px">"Real de la plataforma" = ventas nuevas que ya están facturando en ${q.label}, de la serie sincronizada todas las noches — se compara contra "Impacto ${q.label}" (lo proyectado).</p>`;
+  if(allLogos.length){
+    html+=`<details class="logo-group" style="margin-top:16px" open><summary><span class="co">Logos nuevos</span><span class="lg-meta">${allLogos.length} cuenta${allLogos.length===1?'':'s'} nueva${allLogos.length===1?'':'s'} proyectada${allLogos.length===1?'':'s'} · ${fmt(allLogos.reduce((a,l)=>a+l.tcv,0))} TCV</span></summary>
+      <table class="lg-roles"><thead><tr><th>Vendedor</th><th>Empresa</th><th>Rol</th><th class="num">Cantidad</th><th class="num">TCV</th></tr></thead><tbody>`;
+    allLogos.forEach(l=>{html+=`<tr><td>${l.o}</td><td><b>${l.name}</b></td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td class="num">${l.qty}</td><td class="num">${fmt(l.tcv)}</td></tr>`;});
+    html+='</tbody></table></details>';
+  }
   // ---- Equipo de Customer Success: base, extensiones, bajas y NRR, con su meta ----
   let cC=0,cB=0,cX=0,cH=0,cN=0,mN=0,cA=0,cXR=0,cPend=0,cNR=0;
   html+=`<label class="fld" style="margin:24px 0 10px">Equipo de Customer Success · retención</label>
