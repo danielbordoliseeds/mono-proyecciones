@@ -309,7 +309,8 @@ function readDeals(file){
   rd.onload=e=>{let rows;
     if(ext==='csv')rows=Papa.parse(e.target.result,{skipEmptyLines:true}).data;
     else{const wb=XLSX.read(e.target.result,{type:'array'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false});}
-    if(parseDeals(rows)){const l=$('#loaded2');l.style.display='flex';$('#loaded2-txt').textContent=`${file.name} — ${DEALS.length} deals abiertos`;render();}
+    if(parseDeals(rows)){const l=$('#loaded2');l.style.display='flex';$('#loaded2-txt').textContent=`${file.name} — ${DEALS.length} deals abiertos`;render();
+      if(typeof saveDealsSnapshot==='function')saveDealsSnapshot();}
   };
   if(ext==='csv')rd.readAsText(file,'utf-8');else rd.readAsArrayBuffer(file);
 }
@@ -1255,6 +1256,7 @@ drop2.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readDeals(e.dataTra
       alert('Tu usuario todavía no tiene una cartera asignada. Pedile al administrador que complete tu "comercial_name".');
     if(CONTRACTS.length)render();
     else if(typeof loadRevenueSnapshot==='function')await loadRevenueSnapshot();
+    if(typeof loadDealsSnapshot==='function')await loadDealsSnapshot();
   }
 
   // exponer save/load para el resto de la app
@@ -1291,6 +1293,30 @@ drop2.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readDeals(e.dataTra
     if(flagEl&&!error)setTimeout(()=>{flagEl.textContent='';},4000);
   };
   // ---- revenue compartido (lo sube el admin, lo ven todos) ----
+  // Pipeline de HubSpot: el CSV que sube un admin queda guardado para todo el equipo (misma tabla que el
+  // revenue, fila 'hubspot-deals'; el sync nocturno solo toca 'dataset'). Las reglas de la base dejan escribir
+  // solo al admin; si lo sube otro, lo ve solo esa persona.
+  const dealsBadge=(t)=>{const l=document.getElementById('loaded2');if(l)l.style.display='flex';const b=document.getElementById('loaded2-txt');if(b)b.textContent=t;};
+  const fmtDate=(d)=>new Date(d).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  window.saveDealsSnapshot=async function(){
+    if(!SB||!CURRENT_USER)return;
+    if(CURRENT_USER.role!=='admin'){dealsBadge(`${DEALS.length} deals abiertos · solo los ves vos (lo guarda para el equipo un admin)`);return;}
+    try{
+      const now=new Date().toISOString();
+      const{error}=await SB.from('revenue_snapshots').upsert({quarter:'hubspot-deals',months:[],contracts:DEALS,uploaded_by:CURRENT_USER.id,created_at:now},{onConflict:'quarter'});
+      dealsBadge(error?`${DEALS.length} deals abiertos · no se pudo guardar: ${error.message}`:`Pipeline de HubSpot — ${DEALS.length} deals abiertos · cargado ${fmtDate(now)} · guardado para el equipo ✓`);
+    }catch(e){console.warn('No se pudo guardar el pipeline:',e);}
+  };
+  window.loadDealsSnapshot=async function(){
+    if(!SB||!CURRENT_USER)return;
+    try{
+      const{data,error}=await SB.from('revenue_snapshots').select('contracts,created_at').eq('quarter','hubspot-deals').maybeSingle();
+      if(error||!data||!Array.isArray(data.contracts)||!data.contracts.length)return;
+      DEALS=data.contracts;
+      dealsBadge(`Pipeline de HubSpot — ${DEALS.length} deals abiertos · cargado ${fmtDate(data.created_at)}`);
+      if(CONTRACTS.length)render();
+    }catch(e){console.warn('No se pudo leer el pipeline:',e);}
+  };
   window.saveRevenueSnapshot=async function(fileName){
     if(!SB||!CURRENT_USER||CURRENT_USER.role!=='admin')return; // solo admin persiste
     try{
