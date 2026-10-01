@@ -10,21 +10,21 @@ Este repo contiene la **v1 en producción** y la **especificación de la v2** (v
 
 ## Qué es
 
-App web de un solo archivo (`app/index.html`) que corre sobre:
+App web de un solo archivo (`web/index.html`) que corre sobre:
 - **Supabase** — autenticación (magic-link por email) + base de datos (proyecciones, objetivos, snapshots de revenue).
-- **Netlify** — hosting del sitio estático.
+- **Netlify** — hosting del sitio estático, conectado a este repo (cada push a `main` se publica solo).
 
-Hoy el admin **sube a mano** el CSV de Power BI y la app lo procesa en el navegador.
-El objetivo de la v2 es **reemplazar esa carga manual por un sync en vivo** desde los
-conectores de Seeds Docs (plataforma) y HubSpot (pipeline). Todo el detalle en `V2_SPEC.md`.
+El revenue ya **no se sube a mano**: el sync nocturno (`sync/`) lo trae de la plataforma con la dupla
+vendedor + CS de cada cuenta. El pipeline de HubSpot todavía entra por CSV desde la app. Detalle en `V2_SPEC.md`.
 
 ## Estructura
 
 ```
-app/    → la aplicación
-  index.html                      ← ARCHIVO DESPLEGADO (tiene las claves reales de Supabase)
-  seeds-proyeccion-produccion.html ← plantilla canónica (claves placeholder) — TODA edición va acá primero
-  seeds-proyeccion-LISTO.html      ← copia espejo de index.html
+app/    → la aplicación (fuente)
+  seeds-proyeccion-produccion.html ← plantilla canónica (claves placeholder) — TODA edición va acá
+  build.sh                         ← genera web/index.html inyectando la URL y la clave pública
+web/    → LO QUE PUBLICA NETLIFY (ver netlify.toml): index.html generado + favicon.ico
+sync/   → sync nocturno plataforma → Supabase (Lambda en AWS, ver sync/README.md)
 db/     → esquema de Supabase (correr en orden)
   schema.sql            ← base: profiles, projections, revenue_snapshots, RLS, triggers
   schema_objetivos.sql  ← tabla de objetivos
@@ -35,14 +35,13 @@ docs/   → guías de la v1
 V2_SPEC.md → especificación y plan de la v2 (leer esto para continuar el desarrollo)
 ```
 
-## Flujo de desarrollo (v1)
+## Flujo de desarrollo
 
-1. Editar **`app/seeds-proyeccion-produccion.html`** (la plantilla con placeholders), nunca el `index.html` directo.
-2. Inyectar las claves de Supabase para generar `index.html` y `seeds-proyeccion-LISTO.html`:
-   - `SUPABASE_URL` → `https://xrqxikvhhkkxitsbqxkv.supabase.co`
-   - `SUPABASE_ANON_KEY` → la clave **anon / publishable** (segura para cliente)
-3. Validar los `<script>` inline con `node --check`.
-4. Subir `index.html` a Netlify (arrastrar al deploy; misma URL).
+1. Editar **`app/seeds-proyeccion-produccion.html`** (la plantilla con placeholders), nunca `web/index.html` directo.
+2. `bash app/build.sh` → genera `web/index.html` con la URL y la clave **publishable** de Supabase, chequea que
+   solo cambien esas 2 líneas y que los `<script>` parseen.
+3. Commit + push a `main` → Netlify lo publica solo (misma URL). **No** arrastrar zips a Netlify: el próximo
+   push los pisa.
 
 ## Notas importantes
 
@@ -53,17 +52,9 @@ V2_SPEC.md → especificación y plan de la v2 (leer esto para continuar el desa
 - Login = magic-link por email. La fila en `profiles` se crea al primer login; recién ahí se le
   puede asignar rol por SQL.
 
-## Cómo subir esto al repo (para Daniel)
+## Conectar Netlify al repo (una vez)
 
-Desde tu máquina, con acceso al repo:
-
-```bash
-git clone https://github.com/danielbordoliseeds/proyecciones-mono.git
-cd proyecciones-mono
-# copiar acá el contenido de esta carpeta
-git add .
-git commit -m "v1 en producción + spec de la v2"
-git push origin main
-```
-
-(O, más simple: subir los archivos por la UI web de GitHub → "Add file" → "Upload files".)
+En Netlify, sitio **illustrious-pothos-8c3ca9** → *Site configuration → Build & deploy → Link repository*:
+GitHub → `danielbordoliseeds/mono-proyecciones` → rama `main`. La carpeta a publicar (`web`) y el build vacío
+ya vienen de `netlify.toml`. Desde ahí cada push a `main` se publica solo y Netlify guarda el historial de
+versiones (se puede volver a una anterior desde *Deploys*).

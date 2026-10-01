@@ -1,0 +1,4 @@
+# Netlify publica la carpeta web/ tal cual (sin build). web/index.html se genera con `bash app/build.sh`.
+[build]
+  publish = "web"
+  command = ""
