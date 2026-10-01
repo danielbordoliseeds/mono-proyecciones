@@ -626,6 +626,8 @@ function renderComercial(o){
   const metaCell=(k)=> isAdmin
     ? `<input class="obj-in" data-k="${k}" type="number" min="0" step="500" value="${ob[k]||''}" placeholder="—">`
     : `<span>${ob[k]?fmt(ob[k]):'<span class="muted">sin meta</span>'}</span>`;
+  const nrrSugg=isAdmin?suggestNRR(o):null;
+  const nrrSuggHint=nrrSugg?`<div class="muted" style="font-size:10.5px;margin-top:3px">Sugerido: <a href="#" id="nrr-suggest" data-v="${nrrSugg.value}" style="color:var(--green)">${fmt(nrrSugg.value)}</a> (${nrrSugg.growth>=0?'+':''}${(nrrSugg.growth*100).toFixed(1)}% vs ${prev?prev.label:'Q anterior'}, mín. 7%)</div>`:'';
   html+=`<div class="proj-summary">
     <h3>Composición Q · ${q.label}</h3>
     <div class="ps-row"><span class="l">Base contratada</span><span class="r" id="ps-base">$0</span></div>
@@ -639,7 +641,7 @@ function renderComercial(o){
       <tr><th>Objetivo</th><th>Meta</th><th>Proyectado</th><th></th></tr>
       <tr><td>N. ventas existentes (TCV)</td><td>${metaCell('existing')}</td><td class="num" id="o-proj-existing">$0</td><td class="sem" id="o-sem-existing"></td></tr>
       <tr><td>N. ventas logos (TCV)</td><td>${metaCell('logos')}</td><td class="num" id="o-proj-logos">$0</td><td class="sem" id="o-sem-logos"></td></tr>
-      <tr><td>NRR · revenue Q (sin logos)</td><td>${metaCell('nrr')}</td><td class="num" id="o-proj-nrr">$0</td><td class="sem" id="o-sem-nrr"></td></tr>
+      <tr><td>NRR · revenue Q (sin logos)</td><td>${metaCell('nrr')}${nrrSuggHint}</td><td class="num" id="o-proj-nrr">$0</td><td class="sem" id="o-sem-nrr"></td></tr>
     </table>
     <div id="o-nrr-pct" style="font-size:11.5px;color:#bdbdbd;margin-top:7px"></div>
     ${isAdmin?'<div class="row-actions"><button class="btn ghost" id="btn-obj">Guardar objetivos</button><span class="saved-flag" id="obj-flag"></span></div>':''}
@@ -658,6 +660,9 @@ function renderComercial(o){
   // objetivos (admin)
   $$('#panel .obj-in').forEach(inp=>inp.addEventListener('input',()=>{
     OBJECTIVES[o]=OBJECTIVES[o]||{};OBJECTIVES[o][inp.dataset.k]=parseFloat(inp.value)||0;recalc();}));
+  const ns=$('#nrr-suggest');if(ns)ns.onclick=(e)=>{e.preventDefault();const v=+ns.dataset.v;
+    const inp=$$('#panel .obj-in').find(i=>i.dataset.k==='nrr');if(inp){inp.value=v;}
+    OBJECTIVES[o]=OBJECTIVES[o]||{};OBJECTIVES[o].nrr=v;recalc();};
   const bo=$('#btn-obj');if(bo)bo.onclick=()=>{
     const vals={existing:0,logos:0,nrr:0};$$('#panel .obj-in').forEach(inp=>vals[inp.dataset.k]=parseFloat(inp.value)||0);
     OBJECTIVES[o]=vals;
@@ -887,6 +892,23 @@ function newBreakdown(o){
 }
 function newExpected(o,q){const b=newBreakdown(o);return b.existQ+b.logoQ;}
 
+// crecimiento histórico QoQ de una cartera: promedio de los últimos hasta 4 trimestres cerrados antes de prevId
+function histGrowthRate(list,prevId){
+  const pi=QUARTERS.findIndex(x=>x.id===prevId);const rates=[];
+  for(let k=pi;k>Math.max(0,pi-4);k--){
+    const qq=QUARTERS[k],qqPrev=QUARTERS[k-1];if(!qqPrev)break;
+    const a=sumQ(list,qq),b=sumQ(list,qqPrev);
+    if(b>0)rates.push(a/b-1);
+  }
+  return rates.length?rates.reduce((a,r)=>a+r,0)/rates.length:0;
+}
+// sugerencia de objetivo NRR: histórico de la cartera, con piso de +7% vs el Q anterior
+function suggestNRR(o){
+  const act=activeAccounts();const list=contractsFor(o,act);const prev=baseQ();if(!prev)return null;
+  const curBase=sumQ(list,prev);if(!curBase)return null;
+  const growth=Math.max(histGrowthRate(list,prev.id),0.07);
+  return{value:Math.round(curBase*(1+growth)/100)*100,growth,curBase};
+}
 function velocity(list,q){
   const pi=QUARTERS.findIndex(x=>x.id===q.id);let sum=0,cnt=0,n=0;
   for(let k=pi-1;k>=Math.max(0,pi-3);k--){const qq=QUARTERS[k];
