@@ -29,6 +29,7 @@ db/     → esquema de Supabase (correr en orden)
   schema.sql            ← base: profiles, projections, revenue_snapshots, RLS, triggers
   schema_objetivos.sql  ← tabla de objetivos
   schema_talent.sql     ← rol 'talent' (solo lectura)
+  schema_marcas.sql     ← marcas compartidas de extensiones y bajas (dupla vendedor + CS)
 docs/   → guías de la v1
   GUIA_PASO_A_PASO.md
   README_PRODUCCION.md

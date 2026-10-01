@@ -260,6 +260,32 @@ const ACCT2OWNER={}; Object.entries(OWNERS).forEach(([o,as])=>as.forEach(a=>ACCT
 // Dupla por cuenta (viene de la plataforma en el revenue sincronizado): el vendedor proyecta ventas nuevas y
 // el CS extensiones y bajas; sin CS, el vendedor proyecta todo. Sin dupla (CSV de Power BI) se usa OWNERS.
 let DUPLA={};
+// ===== MARCAS COMPARTIDAS (extensiones y bajas por contrato) =====
+// Vendedor y CS de la dupla pueden marcar el mismo contrato; hay UNA marca por contrato (la última que se guardó)
+// y suma una sola vez, en la cartera de retención de la cuenta (el CS, o el vendedor si no hay CS).
+let MARKS={},MARKS_DIRTY=new Set();
+function markOf(c){const k=ckey(c);if(MARKS[k])return MARKS[k];
+  // compatibilidad: marcas viejas guardadas en la proyección del responsable de retención
+  const s=STATE[retOwnerOf(c.client)];const m={};if(!s)return m;
+  if(s.unchecked&&s.unchecked[k])m.unchecked=true;
+  ['extTicket','extDur','extStart','churn'].forEach(f=>{if(s[f]&&s[f][k]!=null)m[f]=s[f][k];});
+  return m;}
+function setMark(c,patch){const k=ckey(c);const m=Object.assign({},markOf(c),patch);
+  Object.keys(m).forEach(f=>{if(m[f]===undefined)delete m[f];});
+  m.client=c.client;m.by=(CURRENT_USER&&CURRENT_USER.name)||'';m.at=new Date().toISOString();
+  MARKS[k]=m;MARKS_DIRTY.add(k);}
+function extOf(c,q){const m=markOf(c);const li=lastIdx(c);
+  const tk=m.extTicket!=null?m.extTicket:c.series[li];const du=m.extDur!=null?m.extDur:6;
+  const sStart=m.extStart!=null?m.extStart:extStartDefault(c,q);const months=Math.max(0,Math.min(du,3-sStart));
+  return{on:!m.unchecked,tk,du,sStart,aporta:m.unchecked?0:tk*months};}
+function churnOf(c,q){const m=markOf(c);if(m.churn==null)return null;
+  const b=+m.churn||0;const qser=q.idx.map(i=>c.series[i]||0);const total=qser.reduce((a,x)=>a+x,0);
+  let kept=0;for(let j=0;j<3;j++){if(j<Math.floor(b))kept+=qser[j];else if(j===Math.floor(b)&&(b-Math.floor(b))>=0.5)kept+=qser[j]*0.5;}
+  return Math.max(0,total-kept);}
+function markWho(c,o){const r=retOwnerOf(c.client);const m=MARKS[ckey(c)];const bits=[];
+  if(r!==o)bits.push('suma en '+r.replace(' (Mono)',''));
+  if(m&&m.by&&m.at)bits.push('marcó '+m.by.split(' ')[0]+' '+new Date(m.at).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}));
+  return bits.length?`<br><span class="muted" style="font-size:11px">${bits.join(' · ')}</span>`:'';}
 function buildDupla(){DUPLA={};CONTRACTS.forEach(c=>{if(c.vendedor!==undefined&&!DUPLA[c.client])DUPLA[c.client]={vendedor:c.vendedor||null,cs:c.cs||null};});}
 function ownerOf(client){const d=DUPLA[client];return d?(d.vendedor||'Sin asignar'):(ACCT2OWNER[client]||'Sin asignar');}
 function retOwnerOf(client){const d=DUPLA[client];return d?(d.cs||d.vendedor||'Sin asignar'):(ACCT2OWNER[client]||'Sin asignar');}
@@ -401,7 +427,7 @@ function init(){
   const now=new Date();const tgt=new Date(now.getFullYear(),now.getMonth()+(now.getMonth()%3===2?1:0),1);
   const nowKey=`${tgt.getFullYear()}-${String(tgt.getMonth()+1).padStart(2,'0')}`;const curQ=QUARTERS.find(q=>q.idx.some(i=>MONTHS[i].key===nowKey));
   qsel.value=(curQ&&[...qsel.options].some(op=>op.value===curQ.id)?curQ.id:(QUARTERS[Math.max(1,QUARTERS.length-2)]||{}).id)||qsel.value;
-  qsel.onchange=()=>{buildTabs();render();};$('#growth').oninput=render;{const cp=$('#churnpct');if(cp)cp.oninput=render;}
+  qsel.onchange=()=>{MARKS={};MARKS_DIRTY.clear();buildTabs();render();if(typeof loadMarks==='function')loadMarks().then(()=>render());};$('#growth').oninput=render;{const cp=$('#churnpct');if(cp)cp.oninput=render;}
   // aterrizar en una pestaña con motor (no en el consolidado de solo lectura)
   const act=activeAccounts();const order=[...people(),'Sin asignar'];
   const withAccts=order.filter(o=>acctsOf(o,act).size>0);
@@ -446,11 +472,8 @@ function qChurnOptions(selVal){
   return opts.map(o=>`<option value="${o.v}" ${sv===o.v?'selected':''}>${o.t}</option>`).join('');
 }
 function churnLost(o){
-  const st=getState(o);const ctx=window.__ctx||{};const list=ctx.list,q=ctx.q;let tot=0;
-  if(list&&q){list.forEach(c=>{const k=ckey(c);if(st.churn[k]==null)return;
-    const b=+st.churn[k]||0;const qser=q.idx.map(i=>c.series[i]||0);const total=qser.reduce((a,x)=>a+x,0);
-    let kept=0;for(let j=0;j<3;j++){if(j<Math.floor(b))kept+=qser[j];else if(j===Math.floor(b)&&(b-Math.floor(b))>=0.5)kept+=qser[j]*0.5;}
-    tot+=Math.max(0,total-kept);});}
+  const ctx=window.__ctx||{};const list=ctx.list,q=ctx.q;let tot=0;
+  if(list&&q)list.forEach(c=>{const v=churnOf(c,q);if(v!=null)tot+=v;});
   return tot;
 }
 function render(){
@@ -473,6 +496,9 @@ function renderComercial(o){
   const revRef=activeC.reduce((a,c)=>a+c.series[refIdx],0);
   const avgClient=activeClients.size?revRef/activeClients.size:0;
   const ending=endingCandidates(list,q,prev);
+  // lo que ve y puede marcar: contratos de todas sus cuentas (como vendedor o como CS)
+  const seen=new Set();const viewList=[...list,...salesList].filter(c=>{const k=ckey(c);if(seen.has(k))return false;seen.add(k);return true;});
+  const viewEnding=endingCandidates(viewList,q,prev);
   const g=growth(),target=curRev*(1+g/100);
   const accts=[...acctsOf(o,act)].sort();
 
@@ -484,7 +510,7 @@ function renderComercial(o){
       ${kpi('Revenue '+(prev?prev.label:q.label),fmt(kCur),salesOnly?'tus cuentas · referencia':'trimestre base','flat')}
       ${kpi('Base contratada '+q.label,fmt(kBase),salesOnly?'la proyecta el CS':pct(kBase,kCur),salesOnly?'flat':(kBase>=kCur?'up':'down'))}
       ${kpi('Ticket prom./contrato',fmt(avg),activeC.length+' contratos','flat')}
-      ${kpi('Contratos a renovar',ending.length+' contratos',fmt(sumQ(ending,prev||q))+' en juego','down')}
+      ${kpi('Contratos a renovar',viewEnding.length+' contratos',fmt(sumQ(viewEnding,prev||q))+' en juego','down')}
     </div>`;
   // ticket por cliente (desplegable, uno por uno)
   const perClient={};
@@ -498,7 +524,7 @@ function renderComercial(o){
   }
 
   html+=`<div class="tabs" style="margin-top:18px">
-    <div class="tab active" data-t="ext">Extensiones (${ending.length})</div>
+    <div class="tab active" data-t="ext">Extensiones (${viewEnding.length})</div>
     <div class="tab" data-t="baja">Bajas</div>
     <div class="tab" data-t="ong">Contratos activos</div>
     <div class="tab" data-t="opp">💡 De dónde sacar nuevos</div>
@@ -531,7 +557,7 @@ function renderComercial(o){
     <div class="row-actions"><button class="btn primary" id="btn-save">💾 Guardar proyección</button><button class="btn ghost" id="btn-exp">⬇ Exportar Excel</button><span class="saved-flag" id="save-flag"></span></div>
   </div></div>`;
   $('#panel').innerHTML=html;
-  window.__ctx={o,q,prev,list,salesList,ending,accts,target,curRev,base,avg,avgClient};
+  window.__ctx={o,q,prev,list,salesList,ending,viewList,viewEnding,accts,target,curRev,base,avg,avgClient};
   // sub-tabs
   $$('#panel .tab').forEach(t=>t.onclick=()=>{$$('#panel .tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');showSub(t.dataset.t);});
   const firstSub=salesOnly?'opp':'ext';
@@ -550,10 +576,10 @@ function renderComercial(o){
 }
 
 function showSub(which){
-  const L=$('#panL');const{o,q,prev,ending,accts,list}=window.__ctx;const st=getState(o);
+  const L=$('#panL');const{o,q,prev,accts,list}=window.__ctx;const viewList=window.__ctx.viewList||list,ending=window.__ctx.viewEnding||window.__ctx.ending;const st=getState(o);
   if(which==='ong'){
     const refIdx=(prev||q).idx[2];
-    const ong=(list||[]).map(c=>{const rm=c.series[refIdx]||0;const rq=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);return{c,rm,rq};})
+    const ong=(viewList||[]).map(c=>{const rm=c.series[refIdx]||0;const rq=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);return{c,rm,rq};})
       .filter(x=>x.rm>0||x.rq>0).sort((a,b)=>b.rm-a.rm||b.rq-a.rq);
     if(!ong.length){L.innerHTML='<div class="empty">No hay contratos activos en esta cartera.</div>';return;}
     const totM=ong.reduce((a,x)=>a+x.rm,0),totQ=ong.reduce((a,x)=>a+x.rq,0);
@@ -565,24 +591,24 @@ function showSub(which){
     h+='</tbody></table></div>';L.innerHTML=h;return;
   }
   if(which==='baja'){
-    const activos=(list||[]).filter(c=>q.idx.reduce((a,i)=>a+(c.series[i]||0),0)>0)
+    const activos=(viewList||[]).filter(c=>q.idx.reduce((a,i)=>a+(c.series[i]||0),0)>0)
       .sort((a,b)=>q.idx.reduce((x,i)=>x+b.series[i],0)-q.idx.reduce((x,i)=>x+a.series[i],0));
     if(!activos.length){L.innerHTML='<div class="empty">No hay contratos activos en el trimestre en esta cartera.</div>';recalc();return;}
     let h=`<p class="muted" style="margin-bottom:10px">Contratos activos este trimestre. Marcá los que se <b>dan de baja</b> y elegí desde cuándo dejan de facturar. "Se pierde" = revenue del Q que se cae (resta del NRR y del revenue proyectado).<br><span style="color:#bdbdbd">Además, arriba se aplica una <b>baja anticipada</b> global del ${churnPct().toString().replace('.',',')}% sobre la base (promedio del año), sumada a las bajas puntuales que marques acá.</span></p>
       <div style="overflow-x:auto"><table><thead><tr><th>Baja</th><th>Cuenta · profesional</th><th>Modelo</th><th class="num">Revenue Q</th><th>Desde</th><th class="num">Se pierde</th></tr></thead><tbody>`;
     activos.forEach(c=>{const k=ckey(c);const qrev=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);
-      const isCh=st.churn[k]!=null;const fromV=isCh?st.churn[k]:0;
+      const mk=markOf(c);const isCh=mk.churn!=null;const fromV=isCh?mk.churn:0;
       h+=`<tr data-k="${k}">
         <td><input type="checkbox" class="chk ch-c" ${isCh?'checked':''}></td>
-        <td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span></td>
+        <td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span>${markWho(c,o)}</td>
         <td><span class="pill ${c.ctype.toLowerCase()}">${c.ctype}</span></td>
         <td class="num">${fmt(qrev)}</td>
         <td><select class="prob ch-from" ${isCh?'':'disabled'}>${qChurnOptions(fromV)}</select></td>
         <td class="num ch-cell" style="color:#ff8a8d">$0</td></tr>`;});
     h+='</tbody></table></div>';L.innerHTML=h;
-    L.querySelectorAll('tr[data-k]').forEach(tr=>{const k=tr.dataset.k;
-      tr.querySelector('.ch-c').onchange=e=>{if(e.target.checked){st.churn[k]=parseFloat(tr.querySelector('.ch-from').value)||0;tr.querySelector('.ch-from').disabled=false;}else{delete st.churn[k];tr.querySelector('.ch-from').disabled=true;}recalc();};
-      tr.querySelector('.ch-from').onchange=e=>{if(st.churn[k]!=null){st.churn[k]=parseFloat(e.target.value)||0;recalc();}};
+    L.querySelectorAll('tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const c=activos.find(x=>ckey(x)===k);
+      tr.querySelector('.ch-c').onchange=e=>{if(e.target.checked){setMark(c,{churn:parseFloat(tr.querySelector('.ch-from').value)||0});tr.querySelector('.ch-from').disabled=false;}else{setMark(c,{churn:undefined});tr.querySelector('.ch-from').disabled=true;}recalc();};
+      tr.querySelector('.ch-from').onchange=e=>{if(markOf(c).churn!=null){setMark(c,{churn:parseFloat(e.target.value)||0});recalc();}};
     });
     recalc();return;
   }
@@ -592,13 +618,11 @@ function showSub(which){
     let h=`<p class="muted" style="margin-bottom:10px">Contratos que vencen en el trimestre o que ya vencieron en el anterior y podés renovar hacia este Q. Destildá los que no extendés. Editá el <b>ticket</b>, elegí la <b>duración</b> y <b>cuándo arranca</b> la extensión. "Aporta Q" = ticket × meses de la extensión que caen en este trimestre (según el inicio).</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Ext.</th><th>Cuenta · profesional</th><th>Modelo</th><th>Vence</th><th class="num">Ticket</th><th class="num">Dur. (m)</th><th>Inicio</th><th class="num">Aporta Q</th></tr></thead><tbody>`;
     ending.forEach(c=>{const li=lastIdx(c);const k=ckey(c);const endIdx=q.idx.indexOf(li);const endNow=endIdx===0;
-      const tkv=st.extTicket[k]!=null?st.extTicket[k]:c.series[li];
-      const duv=st.extDur[k]!=null?st.extDur[k]:6;
-      const startV=st.extStart[k]!=null?st.extStart[k]:extStartDefault(c,q);
-      const checked=st.unchecked[k]?'':'checked';
+      const ex=extOf(c,q);const tkv=ex.tk,duv=ex.du,startV=ex.sStart;
+      const checked=ex.on?'checked':'';
       h+=`<tr data-k="${k}">
         <td><input type="checkbox" class="chk ex-c" ${checked}></td>
-        <td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span></td>
+        <td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span>${markWho(c,o)}</td>
         <td><span class="pill ${c.ctype.toLowerCase()}">${c.ctype}</span></td>
         <td><span class="pill ${endNow?'end-now':'end-soon'}">${MONTHS[li].key}</span></td>
         <td class="num"><input type="number" class="prob ex-tk" value="${Math.round(tkv)}" min="0" step="100" style="width:78px"></td>
@@ -606,11 +630,11 @@ function showSub(which){
         <td><select class="prob ex-start">${qStartOptions(startV)}</select></td>
         <td class="num ex-cell">$0</td></tr>`;});
     h+='</tbody></table></div>';L.innerHTML=h;
-    L.querySelectorAll('tr[data-k]').forEach(tr=>{const k=tr.dataset.k;
-      tr.querySelector('.ex-c').onchange=e=>{st.unchecked[k]=!e.target.checked;recalc();};
-      tr.querySelector('.ex-tk').oninput=e=>{st.extTicket[k]=parseFloat(e.target.value)||0;recalc();};
-      tr.querySelector('.ex-du').oninput=e=>{st.extDur[k]=parseFloat(e.target.value)||0;recalc();};
-      tr.querySelector('.ex-start').onchange=e=>{st.extStart[k]=parseFloat(e.target.value)||0;recalc();};
+    L.querySelectorAll('tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const c=ending.find(x=>ckey(x)===k);
+      tr.querySelector('.ex-c').onchange=e=>{setMark(c,{unchecked:!e.target.checked});recalc();};
+      tr.querySelector('.ex-tk').oninput=e=>{setMark(c,{extTicket:parseFloat(e.target.value)||0});recalc();};
+      tr.querySelector('.ex-du').oninput=e=>{setMark(c,{extDur:parseFloat(e.target.value)||0});recalc();};
+      tr.querySelector('.ex-start').onchange=e=>{setMark(c,{extStart:parseFloat(e.target.value)||0});recalc();};
     });
   }
   else if(which==='new'){
@@ -750,12 +774,8 @@ function renderNbLines(){
 }
 
 function extExpected(o){
-  const st=getState(o);let tot=0;
-  const {ending,q}=window.__ctx||{};
-  if(ending){ending.forEach(c=>{const k=ckey(c);if(st.unchecked[k])return;
-    const tk=st.extTicket[k]!=null?st.extTicket[k]:c.series[lastIdx(c)];const du=st.extDur[k]!=null?st.extDur[k]:6;
-    const sStart=st.extStart[k]!=null?st.extStart[k]:extStartDefault(c,q);
-    const months=Math.max(0,Math.min(du,3-sStart));tot+=tk*months;});}
+  let tot=0;const {ending,q}=window.__ctx||{};
+  if(ending&&q)ending.forEach(c=>{tot+=extOf(c,q).aporta;});
   return tot;
 }
 function newBreakdown(o){
@@ -826,13 +846,9 @@ function recalc(){
     const months=Math.max(0,Math.min(du,3-sStart));
     cell.textContent=fmt(ch?tk*months:0);});
   // update churn cells
-  const st=getState(o);
   $$('#panL tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const cell=tr.querySelector('.ch-cell');if(!cell)return;
-    if(st.churn[k]==null){cell.textContent='$0';return;}
-    const c=(ctx.list||[]).find(x=>ckey(x)===k);if(!c){cell.textContent='$0';return;}
-    const b=+st.churn[k]||0;const qser=q.idx.map(i=>c.series[i]||0);const tt=qser.reduce((a,x)=>a+x,0);
-    let kept=0;for(let j=0;j<3;j++){if(j<Math.floor(b))kept+=qser[j];else if(j===Math.floor(b)&&(b-Math.floor(b))>=0.5)kept+=qser[j]*0.5;}
-    cell.textContent='-'+fmt(Math.max(0,tt-kept));});
+    const c=(ctx.viewList||ctx.list||[]).find(x=>ckey(x)===k);const v=c?churnOf(c,q):null;
+    cell.textContent=v==null?'$0':'-'+fmt(v);});
   const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
   set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(nb.existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
   set('#ps-churn',churn>0?'-'+fmt(churn):'$0');
@@ -1077,10 +1093,8 @@ function exportExcelBasic(){
     st.newLines.filter(l=>(+l.qty)>0).forEach(l=>{const acc=l.isNew?(l.newName||'cuenta nueva'):l.account;
       S.push([acc,l.isNew?'Logo nuevo':'Cliente existente',l.rol||'a definir',l.area||'a definir',startText(l.start,q),+l.qty,Math.round(+l.ticket),+l.dur,Math.round((+l.qty)*(+l.ticket)*(+l.dur))]);});
     S.push([],['EXTENSIONES PROYECTADAS'],['Cuenta','Profesional','Modelo','Vence','Ticket','Dur. (m)','Inicio','Aporta al Q']);
-    d.ending.forEach(c=>{const k=ckey(c);if(st.unchecked[k])return;const li=lastIdx(c);
-      const tk=st.extTicket&&st.extTicket[k]!=null?st.extTicket[k]:c.series[li];const du=st.extDur&&st.extDur[k]!=null?st.extDur[k]:6;
-      const sStart=st.extStart&&st.extStart[k]!=null?st.extStart[k]:extStartDefault(c,q);
-      const months=Math.max(0,Math.min(du,3-sStart));
+    d.ending.forEach(c=>{const ex=extOf(c,q);if(!ex.on)return;const li=lastIdx(c);
+      const tk=ex.tk,du=ex.du,sStart=ex.sStart;const months=Math.max(0,Math.min(du,3-sStart));
       S.push([c.client,c.person,c.ctype,MONTHS[li].key,Math.round(tk),du,startText(sStart,q),Math.round(tk*months)]);});
     const ws=XLSX.utils.aoa_to_sheet(S);ws['!cols']=[{wch:24},{wch:18},{wch:22},{wch:12},{wch:10},{wch:9},{wch:9},{wch:12}];
     XLSX.utils.book_append_sheet(wb,ws,sheetName(d.o));
@@ -1204,10 +1218,8 @@ async function exportExcelStyled(){
     ws.addRow([]);
     sub(ws,'EXTENSIONES PROYECTADAS',8);
     head(ws,['Cuenta','Profesional','Modelo','Vence','Ticket','Dur. (m)','Inicio','Aporta Q']);
-    let any=false;d.ending.forEach((c,i)=>{const k=ckey(c);if(st.unchecked[k])return;any=true;const li=lastIdx(c);
-      const tk=st.extTicket&&st.extTicket[k]!=null?st.extTicket[k]:c.series[li];const du=st.extDur&&st.extDur[k]!=null?st.extDur[k]:6;
-      const sStart=st.extStart&&st.extStart[k]!=null?st.extStart[k]:extStartDefault(c,q);
-      const months=Math.max(0,Math.min(du,3-sStart));
+    let any=false;d.ending.forEach((c,i)=>{const ex=extOf(c,q);if(!ex.on)return;any=true;const li=lastIdx(c);
+      const tk=ex.tk,du=ex.du,sStart=ex.sStart;const months=Math.max(0,Math.min(du,3-sStart));
       const r=ws.addRow([c.client,c.person,c.ctype,MONTHS[li].key,Math.round(tk),du,startText(sStart,q),Math.round(tk*months)]);
       r.eachCell((cc,col)=>{if(col===5||col===8)cc.numFmt='$#,##0';if(i%2)fillC(cc,GREY);});});
     if(!any)ws.addRow(['(Sin extensiones marcadas)']).getCell(1).font={italic:true,color:{argb:MUT}};
@@ -1285,7 +1297,12 @@ drop2.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readDeals(e.dataTra
       payload:{newLines:st.newLines,unchecked:st.unchecked,extTicket:st.extTicket,extDur:st.extDur,extStart:st.extStart,churn:st.churn},updated_by:CURRENT_USER.id,updated_at:new Date().toISOString()};
     const flag=document.getElementById('save-flag');if(flag)flag.textContent='Guardando…';
     const{error}=await SB.from('projections').upsert(row,{onConflict:'comercial_name,quarter'});
-    if(flag)flag.textContent=error?('Error: '+error.message):('✓ Guardado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}));
+    // marcas de extensiones y bajas: una por contrato, compartidas por la dupla
+    let mErr=null;const dirty=[...MARKS_DIRTY];
+    if(!error&&dirty.length){const qid=projQ().id;
+      const rows=dirty.map(k=>{const m=MARKS[k]||{};return{quarter:qid,ckey:k,client:m.client||k.split('|')[0],mark:m,updated_by:CURRENT_USER.id,updated_at:m.at||new Date().toISOString()};});
+      const r=await SB.from('retention_marks').upsert(rows,{onConflict:'quarter,ckey'});mErr=r.error;if(!mErr)MARKS_DIRTY.clear();}
+    if(flag)flag.textContent=error?('Error: '+error.message):(mErr?('Proyección guardada, pero no las extensiones/bajas: '+mErr.message):('✓ Guardado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})));
     if(flag&&!error)setTimeout(()=>{flag.textContent='';},4000);
   };
   window.loadProjections=async function(){
@@ -1295,7 +1312,14 @@ drop2.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readDeals(e.dataTra
     data.forEach(r=>{STATE[r.comercial_name]={
       newLines:(r.payload&&r.payload.newLines)||[],unchecked:(r.payload&&r.payload.unchecked)||{},prob:(r.payload&&r.payload.prob)||{},
       extTicket:(r.payload&&r.payload.extTicket)||{},extDur:(r.payload&&r.payload.extDur)||{},extStart:(r.payload&&r.payload.extStart)||{},churn:(r.payload&&r.payload.churn)||{},prob:{}};});
+    await window.loadMarks();
     await window.loadObjectives();
+  };
+  window.loadMarks=async function(){
+    if(!SB||!CURRENT_USER||!QUARTERS.length)return;
+    const{data,error}=await SB.from('retention_marks').select('ckey,mark').eq('quarter',projQ().id);
+    if(error||!data)return;
+    data.forEach(r=>{if(!MARKS_DIRTY.has(r.ckey))MARKS[r.ckey]=r.mark||{};});
   };
   window.loadObjectives=async function(){
     if(!SB||!CURRENT_USER||!QUARTERS.length)return;
