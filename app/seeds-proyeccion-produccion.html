@@ -415,7 +415,7 @@ function realExtensions(list,q,prev){
   const realized=[],pending=[],churned=[];
   candidates.forEach(c=>{
     if(q.idx.some(i=>c.series[i]>0))realized.push(c);
-    else if(closed)churned.push(c);
+    else if(closed||markOf(c).finalized)churned.push(c);
     else pending.push(c);
   });
   return{realized,pending,churned,realizedQ:sumQ(realized,q)};
@@ -510,6 +510,7 @@ function buildTabs(){
   const role=(CURRENT_USER&&CURRENT_USER.role)||'admin';
   const canSeeAll=role==='admin'||role==='talent';
   const mine=CURRENT_USER&&CURRENT_USER.comercial_name;
+  const q=projQ(),prev=baseQ();
   // consolidated (admin y talent)
   if(canSeeAll){const cons=document.createElement('div');cons.className='ctab cons'+(ACTIVE==='__cons__'?' active':'');
     cons.innerHTML=`Consolidado <span class="badge">${act.size}</span>`;cons.onclick=()=>{ACTIVE='__cons__';render();};ct.appendChild(cons);}
@@ -519,7 +520,16 @@ function buildTabs(){
     if(role!=='admin' && o!==mine)return;       // comercial: solo su pestaña
     const accts=acctsOf(o,act);
     const st=getState(o);const hasProj=st.newLines&&st.newLines.length;
-    if(accts.size===0 && o!==mine && !hasProj)return;
+    // una cuenta que solo factura en el Q base, ya resuelta como "no se extiende" y marcada por vencer
+    // hace tiempo, no alcanza para sostener la pestaña sola (cuentas churneadas/finalizadas)
+    let hasWork=accts.size>0;
+    if(hasWork&&q){
+      const sales=salesContractsFor(o,act),list=contractsFor(o,act);
+      const billingNow=list.some(c=>q.idx.some(i=>c.series[i]>0));
+      const unresolved=endingCandidates(list,q,prev).some(c=>!markOf(c).finalized);
+      hasWork=sales.length>0||billingNow||unresolved;
+    }
+    if(!hasWork && o!==mine && !hasProj)return;
     const t=document.createElement('div');
     t.className='ctab'+(ACTIVE===o?' active':'')+(o==='Sin asignar'?' warn':'');
     t.innerHTML=`${o.replace(' (Mono)','')} <span class="badge">${accts.size}</span>`;
@@ -714,29 +724,49 @@ function showSub(which){
   }
   if(which==='ext'){
     if(!ending.length){L.innerHTML='<div class="empty">No hay contratos terminando en este trimestre en esta cartera.</div>';recalc();return;}
-    ending.sort((a,b)=>b.series[lastIdx(b)]-a.series[lastIdx(a)]);
-    let h=`<p class="muted" style="margin-bottom:10px">Contratos que vencen en el trimestre o que ya vencieron en el anterior y podés renovar hacia este Q. <b>Tildá los que sí extendés</b> — por defecto no cuentan como proyectado hasta que lo confirmes. Editá el <b>ticket</b>, elegí la <b>duración</b> y <b>cuándo arranca</b> la extensión. "Aporta Q" = ticket × meses de la extensión que caen en este trimestre (según el inicio).</p>
-      <div style="overflow-x:auto"><table><thead><tr><th>Ext.</th><th>Cuenta · profesional</th><th>Modelo</th><th>Vence</th><th class="num">Ticket</th><th class="num">Dur. (m)</th><th>Inicio</th><th class="num">Aporta Q</th></tr></thead><tbody>`;
-    ending.forEach(c=>{const li=lastIdx(c);const k=ckey(c);const endIdx=q.idx.indexOf(li);const endNow=endIdx===0;
-      const ex=extOf(c,q);const tkv=ex.tk,duv=ex.du,startV=ex.sStart;
-      const checked=ex.on?'checked':'';
-      h+=`<tr data-k="${k}">
-        <td><input type="checkbox" class="chk ex-c" ${checked}></td>
-        <td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span>${markWho(c,o)}</td>
-        <td><span class="pill ${c.ctype.toLowerCase()}">${c.ctype}</span></td>
-        <td><span class="pill ${endNow?'end-now':'end-soon'}">${MONTHS[li].key}</span></td>
-        <td class="num"><input type="number" class="prob ex-tk" value="${Math.round(tkv)}" min="0" step="100" style="width:78px"></td>
-        <td class="num"><input type="number" class="prob ex-du" value="${duv}" min="1" max="24" style="width:54px"></td>
-        <td><select class="prob ex-start">${qStartOptions(startV)}</select></td>
-        <td class="num ex-cell">$0</td></tr>`;});
-    h+='</tbody></table></div>';L.innerHTML=h;
-    if(frozen)L.querySelectorAll('input,select').forEach(el=>el.disabled=true);
-    L.querySelectorAll('tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const c=ending.find(x=>ckey(x)===k);
+    // finalizada = ya se marcó explícitamente que no se extiende (ej. una cuenta que churneó): deja de
+    // aparecer como candidata a proyectar, para no mezclarla con las que todavía hay que decidir.
+    const open=ending.filter(c=>!markOf(c).finalized);
+    const closed=ending.filter(c=>markOf(c).finalized);
+    open.sort((a,b)=>b.series[lastIdx(b)]-a.series[lastIdx(a)]);
+    let h=`<p class="muted" style="margin-bottom:10px">Contratos que vencen en el trimestre o que ya vencieron en el anterior y podés renovar hacia este Q. <b>Tildá los que sí extendés</b> — por defecto no cuentan como proyectado hasta que lo confirmes. Si la cuenta churneó o no vas a extenderla nunca, marcala como <b>finalizada</b> para que deje de aparecer acá. Editá el <b>ticket</b>, elegí la <b>duración</b> y <b>cuándo arranca</b> la extensión. "Aporta Q" = ticket × meses de la extensión que caen en este trimestre (según el inicio).</p>`;
+    if(!open.length)h+='<div class="empty">No quedan contratos por decidir en esta cartera.</div>';
+    else{
+      h+=`<div style="overflow-x:auto"><table><thead><tr><th>Ext.</th><th>Cuenta · profesional</th><th>Modelo</th><th>Vence</th><th class="num">Ticket</th><th class="num">Dur. (m)</th><th>Inicio</th><th class="num">Aporta Q</th><th></th></tr></thead><tbody>`;
+      open.forEach(c=>{const li=lastIdx(c);const k=ckey(c);const endIdx=q.idx.indexOf(li);const endNow=endIdx===0;
+        const ex=extOf(c,q);const tkv=ex.tk,duv=ex.du,startV=ex.sStart;
+        const checked=ex.on?'checked':'';
+        h+=`<tr data-k="${k}">
+          <td><input type="checkbox" class="chk ex-c" ${checked}></td>
+          <td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span>${markWho(c,o)}</td>
+          <td><span class="pill ${c.ctype.toLowerCase()}">${c.ctype}</span></td>
+          <td><span class="pill ${endNow?'end-now':'end-soon'}">${MONTHS[li].key}</span></td>
+          <td class="num"><input type="number" class="prob ex-tk" value="${Math.round(tkv)}" min="0" step="100" style="width:78px"></td>
+          <td class="num"><input type="number" class="prob ex-du" value="${duv}" min="1" max="24" style="width:54px"></td>
+          <td><select class="prob ex-start">${qStartOptions(startV)}</select></td>
+          <td class="num ex-cell">$0</td>
+          <td><button class="btn ghost sm ex-final" title="La cuenta churneó o nunca se va a extender">✕ Finalizada</button></td></tr>`;});
+      h+='</tbody></table></div>';
+    }
+    if(closed.length){
+      h+=`<details class="logo-group" style="margin-top:14px"><summary><span class="co">Cuentas finalizadas</span><span class="lg-meta">${closed.length} no se extienden · no suman ni aparecen en el tablero</span></summary>
+        <table class="lg-roles"><thead><tr><th>Cuenta · profesional</th><th>Modelo</th><th>Venció</th><th></th></tr></thead><tbody>`;
+      closed.forEach(c=>{const li=lastIdx(c);h+=`<tr><td><b>${c.client}</b><br><span class="muted">${personLabel(c)}</span>${markWho(c,o)}</td>
+        <td><span class="pill ${c.ctype.toLowerCase()}">${c.ctype}</span></td><td>${li>=0?MONTHS[li].key:'—'}</td>
+        <td><button class="btn ghost sm ex-reopen" data-k="${ckey(c)}">Reabrir</button></td></tr>`;});
+      h+='</tbody></table></details>';
+    }
+    L.innerHTML=h;
+    if(frozen)L.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);
+    L.querySelectorAll('tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const c=open.find(x=>ckey(x)===k);
       tr.querySelector('.ex-c').onchange=e=>{setMark(c,{unchecked:!e.target.checked});recalc();};
       tr.querySelector('.ex-tk').oninput=e=>{setMark(c,{extTicket:parseFloat(e.target.value)||0});recalc();};
       tr.querySelector('.ex-du').oninput=e=>{setMark(c,{extDur:parseFloat(e.target.value)||0});recalc();};
       tr.querySelector('.ex-start').onchange=e=>{setMark(c,{extStart:parseFloat(e.target.value)||0});recalc();};
+      const fb=tr.querySelector('.ex-final');if(fb)fb.onclick=()=>{setMark(c,{finalized:true,unchecked:true});showSub('ext');buildTabs();};
     });
+    L.querySelectorAll('.ex-reopen').forEach(b=>{const k=b.dataset.k;const c=closed.find(x=>ckey(x)===k);
+      b.onclick=()=>{setMark(c,{finalized:undefined});showSub('ext');buildTabs();};});
   }
   else if(which==='new'){
     let h=`<p class="muted" style="margin-bottom:6px">Proyectá nuevos contratos. Elegí una cuenta existente o creá una nueva. Área y rol son <b>opcionales</b>. El <b>inicio</b> define cuánto del contrato cae dentro del trimestre (medio mes cuenta como 0,5); el TCV total no cambia.</p>
