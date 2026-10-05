@@ -732,7 +732,11 @@ function showSub(which){
     let h=`<p class="muted" style="margin-bottom:10px">Contratos que vencen en el trimestre o que ya vencieron en el anterior y podés renovar hacia este Q. <b>Tildá los que sí extendés</b> — por defecto no cuentan como proyectado hasta que lo confirmes. Si la cuenta churneó o no vas a extenderla nunca, marcala como <b>finalizada</b> para que deje de aparecer acá. Editá el <b>ticket</b>, elegí la <b>duración</b> y <b>cuándo arranca</b> la extensión. "Aporta Q" = ticket × meses de la extensión que caen en este trimestre (según el inicio).</p>`;
     if(!open.length)h+='<div class="empty">No quedan contratos por decidir en esta cartera.</div>';
     else{
-      h+=`<div style="overflow-x:auto"><table><thead><tr><th>Ext.</th><th>Cuenta · profesional</th><th>Modelo</th><th>Vence</th><th class="num">Ticket</th><th class="num">Dur. (m)</th><th>Inicio</th><th class="num">Aporta Q</th><th></th></tr></thead><tbody>`;
+      h+=`<div class="row-actions" style="margin-bottom:10px">
+        <button class="btn ghost sm" id="ex-all-on">✓ Tildar todas (${open.length})</button>
+        <button class="btn ghost sm" id="ex-all-off">Destildar todas</button>
+      </div>
+      <div style="overflow-x:auto"><table><thead><tr><th>Ext.</th><th>Cuenta · profesional</th><th>Modelo</th><th>Vence</th><th class="num">Ticket</th><th class="num">Dur. (m)</th><th>Inicio</th><th class="num">Aporta Q</th><th></th></tr></thead><tbody>`;
       open.forEach(c=>{const li=lastIdx(c);const k=ckey(c);const endIdx=q.idx.indexOf(li);const endNow=endIdx===0;
         const ex=extOf(c,q);const tkv=ex.tk,duv=ex.du,startV=ex.sStart;
         const checked=ex.on?'checked':'';
@@ -767,6 +771,9 @@ function showSub(which){
     });
     L.querySelectorAll('.ex-reopen').forEach(b=>{const k=b.dataset.k;const c=closed.find(x=>ckey(x)===k);
       b.onclick=()=>{setMark(c,{finalized:undefined});showSub('ext');buildTabs();};});
+    const allOn=$('#ex-all-on'),allOff=$('#ex-all-off');
+    if(allOn)allOn.onclick=()=>{open.forEach(c=>setMark(c,{unchecked:false}));showSub('ext');};
+    if(allOff)allOff.onclick=()=>{open.forEach(c=>setMark(c,{unchecked:true}));showSub('ext');};
   }
   else if(which==='new'){
     let h=`<p class="muted" style="margin-bottom:6px">Proyectá nuevos contratos. Elegí una cuenta existente o creá una nueva. Área y rol son <b>opcionales</b>. El <b>inicio</b> define cuánto del contrato cae dentro del trimestre (medio mes cuenta como 0,5); el TCV total no cambia.</p>
