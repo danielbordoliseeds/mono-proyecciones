@@ -252,6 +252,12 @@ const OWNERS={
   'Juan Maggiolo':[],
 };
 const ACCT2OWNER={}; Object.entries(OWNERS).forEach(([o,as])=>as.forEach(a=>ACCT2OWNER[a]=o));
+// Cuentas SIN revenue mensual recurrente (venta FTE/placement, fee único) — el sync no las trae porque
+// no tienen serie de net revenue. Se agregan a mano acá para que el vendedor las tenga como cuenta
+// existente al proyectar (y no se le mezclen con "logo nuevo"). Clave = nombre exacto del vendedor en DUPLA/OWNERS.
+const FTE_ACCOUNTS={
+  'Benjamin Miguens':['Assist Card'],
+};
 // Dupla por cuenta (viene de la plataforma en el revenue sincronizado): el vendedor proyecta ventas nuevas y
 // el CS extensiones y bajas; sin CS, el vendedor proyecta todo. Sin dupla (CSV de Power BI) se usa OWNERS.
 let DUPLA={};
@@ -439,7 +445,11 @@ function contractsFor(comercial,activeSet){
 function salesContractsFor(comercial,activeSet){
   return CONTRACTS.filter(c=>activeSet.has(c.client)&&ownerOf(c.client)===comercial);
 }
-function acctsOf(o,activeSet){return new Set([...contractsFor(o,activeSet),...salesContractsFor(o,activeSet)].map(c=>c.client));}
+function acctsOf(o,activeSet){
+  const s=new Set([...contractsFor(o,activeSet),...salesContractsFor(o,activeSet)].map(c=>c.client));
+  (FTE_ACCOUNTS[o]||[]).forEach(a=>s.add(a));
+  return s;
+}
 function ckey(c){return c.client+'|'+c.person+'|'+c.ctype;}
 function personLabel(c){return c.person+(c.role?' · '+c.role:'');}
 
@@ -527,7 +537,8 @@ function buildTabs(){
       const sales=salesContractsFor(o,act),list=contractsFor(o,act);
       const billingNow=list.some(c=>q.idx.some(i=>c.series[i]>0));
       const unresolved=endingCandidates(list,q,prev).some(c=>!markOf(c).finalized);
-      hasWork=sales.length>0||billingNow||unresolved;
+      const hasFTE=(FTE_ACCOUNTS[o]||[]).length>0;
+      hasWork=sales.length>0||billingNow||unresolved||hasFTE;
     }
     if(!hasWork && o!==mine && !hasProj)return;
     const t=document.createElement('div');
