@@ -400,6 +400,7 @@ function firstIdx(c){for(let i=0;i<c.series.length;i++)if(c.series[i]>0)return i
 function endsInWindow(c,q,prev){const L=lastIdx(c);return q.idx.includes(L)||(prev&&prev.idx.includes(L));}
 function endingCandidates(list,q,prev){return list.filter(c=>endsInWindow(c,q,prev));}
 function isQuarterClosed(q){return !!(q&&q.end)&&new Date()>q.end;}
+function isFrozen(q){return !!(q&&DEADLINES[q.id]&&new Date()>new Date(DEADLINES[q.id]));}
 // cuánto de lo real de la plataforma (series ya sincronizada) corresponde a ventas nuevas de este Q:
 // separa logo nuevo (la cuenta no facturaba nada antes) de cliente existente (nueva línea)
 function clientHadRevenueBefore(client,beforeIdx){
@@ -594,7 +595,7 @@ function renderComercial(o){
   const nbC=newBreakdown(o);
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
   const __save=window.__ctx;window.__ctx={o,q,ending,list};const extProjC=extExpected(o);window.__ctx=__save;
-  const frozen=DEADLINES[q.id]&&new Date()>new Date(DEADLINES[q.id]);
+  const frozen=isFrozen(q);
 
   let html=`<h2><span class="n">3</span>${o} · ${q.label}</h2>
     <p class="sub">${accts.length} cuentas activas · base ${prev?prev.label:'—'}. La meta es +${g}% sobre el Q anterior.</p>
@@ -649,6 +650,29 @@ function renderComercial(o){
     : `<span>${ob[k]?fmt(ob[k]):'<span class="muted">sin meta</span>'}</span>`;
   const nrrSugg=isAdmin?suggestNRR(o):null;
   const nrrSuggHint=nrrSugg?`<div class="muted" style="font-size:10.5px;margin-top:3px">Sugerido: <a href="#" id="nrr-suggest" data-v="${nrrSugg.value}" style="color:var(--green)">${fmt(nrrSugg.value)}</a> (${nrrSugg.growth>=0?'+':''}${(nrrSugg.growth*100).toFixed(1)}% vs ${prev?prev.label:'Q anterior'}, mín. 7%)</div>`:'';
+  // Q cerrado (fecha límite pasada): la tabla editable de objetivos se reemplaza por el
+  // scoreboard de cumplimiento (real vs meta) — ya no hay nada que cargar, solo leer.
+  const realNRRv=sumQ(list,q);
+  const objBlock=frozen?(()=>{
+      const parts=[];
+      if(ob.existing)parts.push(completionPct(rs.existQ,ob.existing));
+      if(ob.logos)parts.push(completionPct(rs.logoQ,ob.logos));
+      if(ob.nrr)parts.push(completionPct(realNRRv,ob.nrr));
+      const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
+      return `<h3 style="margin-top:20px">🏆 Cumplimiento ${q.label} <span style="color:#888;font-weight:500;text-transform:none">· Q cerrado</span></h3>
+        ${overall!=null?`<div style="font-size:34px;font-weight:800;color:${completionColor(overall)};margin:4px 0 10px">${overall}%</div>`:'<div class="muted" style="margin:4px 0 10px">Sin metas cargadas</div>'}
+        ${ob.existing?meterRow('N. ventas existentes',rs.existQ,ob.existing):''}
+        ${ob.logos?meterRow('N. ventas logos',rs.logoQ,ob.logos):''}
+        ${ob.nrr?meterRow('NRR · revenue Q',realNRRv,ob.nrr):''}`;
+    })():`<h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
+    <table class="objt">
+      <tr><th>Objetivo</th><th>Meta</th><th>Proyectado</th><th></th></tr>
+      <tr><td>N. ventas existentes (TCV)</td><td>${metaCell('existing')}</td><td class="num" id="o-proj-existing">$0</td><td class="sem" id="o-sem-existing"></td></tr>
+      <tr><td>N. ventas logos (TCV)</td><td>${metaCell('logos')}</td><td class="num" id="o-proj-logos">$0</td><td class="sem" id="o-sem-logos"></td></tr>
+      <tr><td>NRR · revenue Q (sin logos)</td><td>${metaCell('nrr')}${nrrSuggHint}</td><td class="num" id="o-proj-nrr">$0</td><td class="sem" id="o-sem-nrr"></td></tr>
+    </table>
+    <div id="o-nrr-pct" style="font-size:11.5px;color:#bdbdbd;margin-top:7px"></div>
+    ${isAdmin?'<div class="row-actions"><button class="btn ghost" id="btn-obj">Guardar objetivos</button><span class="saved-flag" id="obj-flag"></span></div>':''}`;
   html+=`<div class="proj-summary">
     <h3>Composición Q · ${q.label}</h3>
     <div class="ps-row"><span class="l">Base contratada</span><span class="r" id="ps-base">$0</span></div>
@@ -657,16 +681,8 @@ function renderComercial(o){
     <div class="ps-row"><span class="l">+ N. ventas logos (Q)</span><span class="r" id="ps-newl">$0</span></div>
     <div class="ps-row"><span class="l">− Bajas (churn)</span><span class="r" id="ps-churn" style="color:#ff8a8d">$0</span></div>
     <div class="ps-row tot"><span class="l">Revenue Q proyectado</span><span class="r" id="ps-tot">$0</span></div>
-    <h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
-    <table class="objt">
-      <tr><th>Objetivo</th><th>Meta</th><th>Proyectado</th><th></th></tr>
-      <tr><td>N. ventas existentes (TCV)</td><td>${metaCell('existing')}</td><td class="num" id="o-proj-existing">$0</td><td class="sem" id="o-sem-existing"></td></tr>
-      <tr><td>N. ventas logos (TCV)</td><td>${metaCell('logos')}</td><td class="num" id="o-proj-logos">$0</td><td class="sem" id="o-sem-logos"></td></tr>
-      <tr><td>NRR · revenue Q (sin logos)</td><td>${metaCell('nrr')}${nrrSuggHint}</td><td class="num" id="o-proj-nrr">$0</td><td class="sem" id="o-sem-nrr"></td></tr>
-    </table>
-    <div id="o-nrr-pct" style="font-size:11.5px;color:#bdbdbd;margin-top:7px"></div>
-    ${isAdmin?'<div class="row-actions"><button class="btn ghost" id="btn-obj">Guardar objetivos</button><span class="saved-flag" id="obj-flag"></span></div>':''}
-    <div class="row-actions"><button class="btn primary" id="btn-save" ${frozen?'disabled title="Proyección cerrada"':''}>💾 Guardar proyección</button><button class="btn ghost" id="btn-exp">⬇ Exportar Excel</button><span class="saved-flag" id="save-flag"></span></div>
+    ${objBlock}
+    <div class="row-actions">${frozen?'':'<button class="btn primary" id="btn-save">💾 Guardar proyección</button>'}<button class="btn ghost" id="btn-exp">⬇ Exportar Excel</button><span class="saved-flag" id="save-flag"></span></div>
   </div></div>`;
   $('#panel').innerHTML=html;
   window.__ctx={o,q,prev,list,salesList,ending,viewList,viewEnding,accts,target,curRev,base,avg,avgClient};
@@ -696,7 +712,7 @@ function showSub(which){
   const L=$('#panL');const{o,q,prev,accts,list}=window.__ctx;const st=getState(o);
   let viewList=window.__ctx.viewList||list,ending=window.__ctx.viewEnding||window.__ctx.ending;
   if(ACCT_FILTER){viewList=viewList.filter(c=>c.client===ACCT_FILTER);ending=ending.filter(c=>c.client===ACCT_FILTER);}
-  const frozen=!!(DEADLINES[q.id]&&new Date()>new Date(DEADLINES[q.id]));
+  const frozen=isFrozen(q);
   if(which==='ong'){
     const refIdx=(prev||q).idx[2];
     const ong=(viewList||[]).map(c=>{const rm=c.series[refIdx]||0;const rq=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);return{c,rm,rq};})
@@ -1060,7 +1076,7 @@ function renderConsolidated(){
     rows.push({o,inSales:sList.length>0||hasNew,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
       cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
-      realSalesQ:rs.total,realExt:rx,realNRR:sumQ(list,q),
+      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExt:rx,realNRR:sumQ(list,q),
       nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
   const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
@@ -1076,6 +1092,35 @@ function renderConsolidated(){
       ${kpi('Extensiones',fmt(tExt),'esperado ponderado','flat')}
       ${kpi('Retención Q vs meta',fmt(totRetQ),pct2(totRetQ,target),totRetQ>=target?'up':'down')}
     </div>`;
+  // ---- Scoreboard de cumplimiento: solo cuando el Q ya está congelado (fecha límite pasada) ----
+  if(isFrozen(q)){
+    const scored=rows.map(r=>{
+      const parts=[];
+      if(r.obj.existing)parts.push(completionPct(r.realExistQ,r.obj.existing));
+      if(r.obj.logos)parts.push(completionPct(r.realLogoQ,r.obj.logos));
+      if(r.obj.nrr)parts.push(completionPct(r.realNRR,r.obj.nrr));
+      if(!parts.length)return null;
+      const overall=Math.round(parts.reduce((a,p)=>a+p,0)/parts.length);
+      return{...r,overall};
+    }).filter(Boolean).sort((a,b)=>b.overall-a.overall);
+    if(scored.length){
+      const teamAvg=Math.round(scored.reduce((a,r)=>a+r.overall,0)/scored.length);
+      html+=`<label class="fld" style="margin:24px 0 10px">🏆 Cumplimiento del objetivo · ${q.label} (Q cerrado)</label>
+        <div class="section-note">Promedio del equipo: <b style="color:${completionColor(teamAvg)}">${teamAvg}%</b>. Clickeá una tarjeta para ver el detalle de esa persona.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:12px">`;
+      scored.forEach((r,i)=>{
+        html+=`<div class="card score-card" data-o="${r.o}" style="margin-top:0;padding:16px;cursor:pointer">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+            <b style="font-size:13px">#${i+1} ${nm(r.o)}</b>
+            <span style="font-size:20px;font-weight:800;color:${completionColor(r.overall)}">${r.overall}%</span>
+          </div>
+          ${r.obj.existing?meterRow('N. existentes',r.realExistQ,r.obj.existing,true):''}
+          ${r.obj.logos?meterRow('Logos nuevos',r.realLogoQ,r.obj.logos,true):''}
+          ${r.obj.nrr?meterRow('NRR',r.realNRR,r.obj.nrr,true):''}
+        </div>`;});
+      html+=`</div>`;
+    }
+  }
   // ---- Equipo de Ventas: nuevas ventas (existentes + logos), con sus metas ----
   let sE=0,sL=0,sQ=0,mE=0,mL=0,sA=0;
   let sR=0;
@@ -1183,6 +1228,7 @@ function renderConsolidated(){
   const cb=$('#cons-bars');if(cb)cb.innerHTML=arr.map(([n,v])=>`<div class="bar-row"><div class="nm" title="${n}">${n}</div><div class="track"><div class="fill" style="width:${v/mx*100}%"></div></div><div class="val">${fmt(v)}</div></div>`).join('');
   const ce=$('#cons-exp');if(ce)ce.onclick=exportExcel;
   const bd=$('#brief-dl');if(bd)bd.onclick=exportBriefTA;
+  $$('#panel .score-card').forEach(card=>card.onclick=()=>{ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
 }
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
 
@@ -1194,6 +1240,17 @@ function pct(a,b){if(!b)return '';const p=(a/b-1)*100;return (p>=0?'+':'')+p.toF
 function metaTd(meta,proj){if(!meta)return `<td class="num"><span class="muted">sin meta</span></td>`;
   const ok=proj>=meta;return `<td class="num" style="color:${ok?'var(--green)':'var(--red)'}">${fmt(meta)} ${ok?'✓':'('+fmt(proj-meta)+')'}</td>`;}
 function pctOf(a,b){return b?Math.round(a/b*100)+'%':'—';}
+// scoreboard de cumplimiento (Q congelado): un medidor por objetivo, real vs meta
+function completionPct(real,meta){return meta?Math.round(real/meta*100):null;}
+function completionColor(p){return p==null?'var(--g500)':(p>=100?'var(--green)':(p>=75?'var(--amber)':'var(--red)'));}
+function meterRow(label,real,meta,compact){
+  const p=completionPct(real,meta);const color=completionColor(p);const w=p==null?0:Math.min(100,p);
+  return `<div class="gauge" style="margin-top:${compact?'8px':'16px'};padding:${compact?'10px 12px':'14px'}">
+    <div class="t"><span>${label}</span><span style="color:${color}">${p==null?'sin meta':p+'%'}</span></div>
+    <div class="track"><div class="fill" style="width:${w}%;background:${color}"></div></div>
+    ${compact?'':`<div class="msg" style="color:${color}">${fmt(real)} de ${meta?fmt(meta):'—'}</div>`}
+  </div>`;
+}
 
 function exportBriefTA(){
   const b=window.__briefTA||{rows:[],q:''};const rows=b.rows||[];
