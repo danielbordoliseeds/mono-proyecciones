@@ -809,6 +809,15 @@ function showSub(which){
       <button class="btn ghost sm" id="nb-add" style="margin-top:6px">+ Agregar línea</button>`;
     L.innerHTML=h;renderNbLines();
     if(frozen){L.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);}
+    // lo que cargó la otra persona de la dupla en una cuenta compartida (solo lectura)
+    const shared=sharedNewLines(o);
+    if(shared.length){
+      let sh=`<details class="logo-group" style="margin-top:16px" open><summary><span class="co">Compartidas con tu dupla</span><span class="lg-meta">${shared.length} línea${shared.length===1?'':'s'} que cargó la otra persona de la cuenta</span></summary>
+        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Rol</th><th>Cargó</th></tr></thead><tbody>`;
+      shared.forEach(l=>{sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td>${l._by.replace(' (Mono)','')}</td></tr>`;});
+      sh+='</tbody></table></details>';
+      L.insertAdjacentHTML('beforeend',sh);
+    }
     // referencia: ticket promedio por cuenta
     const tm=acctTicketMap();const ents=Object.entries(tm).sort((a,b)=>b[1]-a[1]);
     if(ents.length){const cnt=acctContratosMap();
@@ -905,6 +914,22 @@ function acctContratosMap(){
   const ctx=window.__ctx||{};const list=[...new Set([...(ctx.list||[]),...(ctx.salesList||[])])];const q=ctx.q,prev=ctx.prev;if(!q)return {};
   const refIdx=(prev||q).idx[2];const m={};
   list.forEach(c=>{if(!(c.series[refIdx]>0))return;m[c.client]=(m[c.client]||0)+1;});return m;
+}
+// líneas de "nuevos a vender" que cargó la OTRA persona de la dupla (vendedor/CS) en una cuenta
+// compartida — ej. Cande (CS) carga algo en BHP y Tomi (vendedor de BHP) lo tiene que poder ver.
+// Solo cruza cuentas existentes (una línea de logo nuevo no tiene dupla todavía).
+function sharedNewLines(o){
+  const out=[];
+  Object.keys(STATE).forEach(p=>{
+    if(p===o)return;
+    (STATE[p].newLines||[]).forEach(l=>{
+      if(l.isNew||!l.account)return;
+      const d=DUPLA[l.account];if(!d)return;
+      const pair=[d.vendedor,d.cs].filter(Boolean);
+      if(pair.includes(o)&&pair.includes(p))out.push({...l,_by:p});
+    });
+  });
+  return out;
 }
 function renderNbLines(){
   const {o,accts}=window.__ctx;const st=getState(o);const c=$('#nb-list');if(!c)return;c.innerHTML='';
