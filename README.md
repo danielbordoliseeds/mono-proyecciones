@@ -32,6 +32,7 @@ db/     → esquema de Supabase (correr en orden)
   schema_marcas.sql     ← marcas compartidas de extensiones y bajas (dupla vendedor + CS)
   schema_deadline.sql   ← fecha límite por trimestre (freeze visual de la proyección)
   schema_projections_lectura_compartida.sql ← cualquier logueado puede leer projections (dupla ve "nuevos a vender")
+  schema_consolidado_viewer.sql ← permiso can_view_consolidado (ver Consolidado sin ser admin)
 docs/   → guías de la v1
   GUIA_PASO_A_PASO.md
   README_PRODUCCION.md

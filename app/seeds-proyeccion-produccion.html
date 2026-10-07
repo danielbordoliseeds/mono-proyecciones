@@ -519,7 +519,7 @@ function setupDeadlineCtrl(){
 function buildTabs(){
   const act=activeAccounts();const ct=$('#ctabs');ct.innerHTML='';
   const role=(CURRENT_USER&&CURRENT_USER.role)||'admin';
-  const canSeeAll=role==='admin'||role==='talent';
+  const canSeeAll=role==='admin'||role==='talent'||!!(CURRENT_USER&&CURRENT_USER.canViewConsolidado);
   const mine=CURRENT_USER&&CURRENT_USER.comercial_name;
   const q=projQ(),prev=baseQ();
   // consolidated (admin y talent)
@@ -980,6 +980,17 @@ function newBreakdown(o){
   return{existTCV,logoTCV,existQ,logoQ,logos,tcvTotal:existTCV+logoTCV};
 }
 function newExpected(o,q){const b=newBreakdown(o);return b.existQ+b.logoQ;}
+// nuevas ventas que caen DENTRO de una cartera de retención dada (cuentas existentes de esa cartera),
+// sin importar quién las cargó — para que la tabla de CS muestre también lo que se vendió en sus cuentas.
+function newSalesIntoAccounts(accts,q){
+  let tot=0;
+  Object.values(STATE).forEach(st=>{(st.newLines||[]).forEach(l=>{
+    if(l.isNew||!l.account||!accts.has(l.account))return;
+    const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
+    tot+=qn*tk*Math.max(0,Math.min(du,3-st0));
+  });});
+  return tot;
+}
 
 // crecimiento histórico QoQ de una cartera: promedio de los últimos hasta 4 trimestres cerrados antes de prevId
 function histGrowthRate(list,prevId){
@@ -1092,6 +1103,7 @@ function renderConsolidated(){
     const save=window.__ctx;window.__ctx={o,q,ending,list};const ext=extExpected(o);const chn=totalChurn(o,b);window.__ctx=save;
     const nb=newBreakdown(o);
     const rs=realSales(sList,q);const rx=realExtensions(list,q,prev);
+    const csNewQ=list.length?newSalesIntoAccounts(new Set(list.map(c=>c.client)),q):0;
     tExist+=nb.existTCV;tLogo+=nb.logoTCV;tExt+=ext;tNewQ+=(nb.existQ+nb.logoQ);tChurn+=chn;
     nb.logos.forEach(l=>allLogos.push({o:o.replace(' (Mono)',''),...l}));
     (stO.newLines||[]).filter(l=>(+l.qty)>0).forEach(l=>allNew.push({o:o.replace(' (Mono)',''),
@@ -1100,12 +1112,13 @@ function renderConsolidated(){
       tcv:(+l.qty)*(+l.ticket)*(+l.dur)}));
     rows.push({o,inSales:sList.length>0||hasNew,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
-      cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
+      cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,csNewQ,
       realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExt:rx,realNRR:sumQ(list,q),
-      nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
+      nrrProj:b+ext+csNewQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
   const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
   const nm=o=>o.replace(' (Mono)','');
+  const growthPct=(cur,proj)=>{if(!cur)return '<span class="muted">—</span>';const p=(proj/cur-1)*100;const col=p>=0?'var(--green)':'var(--red)';return `<b style="color:${col}">${p>=0?'+':''}${p.toFixed(1)}%</b>`;};
   const closed=isQuarterClosed(q);
   let html=`<h2><span class="n">3</span>Consolidado · ${q.label}</h2>
     <p class="sub">${act.size} cuentas activas · ${salesRows.length} en ventas y ${csRows.length} en Customer Success. Meta de retención +${g}%.</p>
@@ -1154,7 +1167,7 @@ function renderConsolidated(){
       <th>Vendedor</th><th class="num">Ctas</th>
       <th class="num">Existentes (TCV)</th><th class="num">Meta</th>
       <th class="num">Logos (TCV)</th><th class="num">Meta</th>
-      <th class="num">Total TCV</th><th class="num">Impacto ${q.label}</th>
+      <th class="num">Impacto ${q.label}</th>
       <th class="num">Real de la plataforma${closed?' (final)':''}</th>
     </tr></thead><tbody>`;
   salesRows.sort((a,b)=>(b.existTCV+b.logoTCV)-(a.existTCV+a.logoTCV)).forEach(r=>{
@@ -1162,13 +1175,13 @@ function renderConsolidated(){
     html+=`<tr><td><b>${nm(r.o)}</b></td><td class="num">${r.salesAccts}</td>
       <td class="num">${fmt(r.existTCV)}</td>${metaTd(r.obj.existing||0,r.existTCV)}
       <td class="num">${fmt(r.logoTCV)}</td>${metaTd(r.obj.logos||0,r.logoTCV)}
-      <td class="num"><b>${fmt(r.existTCV+r.logoTCV)}</b></td><td class="num">${fmt(r.newQ)}</td>
+      <td class="num">${fmt(r.newQ)}</td>
       ${metaTd(r.newQ,r.realSalesQ)}</tr>`;});
-  if(!salesRows.length)html+=`<tr><td colspan="9"><span class="muted">Sin vendedores con cuentas o ventas proyectadas.</span></td></tr>`;
+  if(!salesRows.length)html+=`<tr><td colspan="8"><span class="muted">Sin vendedores con cuentas o ventas proyectadas.</span></td></tr>`;
   html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL VENTAS</b></td><td class="num">${sA}</td>
       <td class="num"><b>${fmt(sE)}</b></td>${metaTd(mE,sE)}
       <td class="num"><b>${fmt(sL)}</b></td>${metaTd(mL,sL)}
-      <td class="num"><b>${fmt(sE+sL)}</b></td><td class="num"><b>${fmt(sQ)}</b></td>
+      <td class="num"><b>${fmt(sQ)}</b></td>
       ${metaTd(sQ,sR)}</tr>
     </tbody></table></div>
     <p class="muted" style="margin-top:6px;font-size:11.5px">"Real de la plataforma" = ventas nuevas que ya están facturando en ${q.label}, de la serie sincronizada todas las noches — se compara contra "Impacto ${q.label}" (lo proyectado).</p>`;
@@ -1178,34 +1191,33 @@ function renderConsolidated(){
     allLogos.forEach(l=>{html+=`<tr><td>${l.o}</td><td><b>${l.name}</b></td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td class="num">${l.qty}</td><td class="num">${fmt(l.tcv)}</td></tr>`;});
     html+='</tbody></table></details>';
   }
-  // ---- Equipo de Customer Success: base, extensiones, bajas y NRR, con su meta ----
-  let cC=0,cB=0,cX=0,cH=0,cN=0,mN=0,cA=0,cXR=0,cPend=0,cNR=0;
+  // ---- Equipo de Customer Success: crecimiento, extensiones, nuevas ventas en la cartera y NRR ----
+  let cC=0,cB=0,cCSNew=0,cX=0,cXR=0,cPend=0,cH=0,cN=0,mN=0,cA=0;
   html+=`<label class="fld" style="margin:24px 0 10px">Equipo de Customer Success · retención</label>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>CS</th><th class="num">Ctas</th>
-      <th class="num">Revenue ${(prev||q).label}</th><th class="num">Base ${q.label}</th>
-      <th class="num">+ Extensiones</th><th class="num">− Bajas</th>
-      <th class="num">NRR proy.</th><th class="num">Meta NRR</th><th class="num">NRR %</th>
-      <th class="num">Ext. real${closed?' (final)':''}</th><th class="num">NRR real${closed?' (final)':''}</th>
+      <th>CS</th><th class="num">Ctas</th><th class="num">Crecimiento</th>
+      <th class="num">Base ${q.label}</th><th class="num">+ Nuevas ventas</th>
+      <th class="num">Extensiones (proy. / real)</th><th class="num">− Bajas</th>
+      <th class="num">NRR proyectado</th>
     </tr></thead><tbody>`;
-  csRows.sort((a,b)=>b.cur-a.cur).forEach(r=>{
-    cC+=r.cur;cB+=r.base;cX+=r.ext;cH+=r.churn;cN+=r.nrrProj;mN+=r.obj.nrr||0;cA+=r.csAccts;
-    cXR+=r.realExt.realizedQ;cPend+=r.realExt.pending.length;cNR+=r.realNRR;
+  csRows.sort((a,b)=>b.nrrProj-a.nrrProj).forEach(r=>{
+    cC+=r.cur;cB+=r.base;cCSNew+=r.csNewQ;cX+=r.ext;cXR+=r.realExt.realizedQ;cPend+=r.realExt.pending.length;
+    cH+=r.churn;cN+=r.nrrProj;mN+=r.obj.nrr||0;cA+=r.csAccts;
     html+=`<tr><td><b>${nm(r.o)}</b></td><td class="num">${r.csAccts}</td>
-      <td class="num">${fmt(r.cur)}</td><td class="num">${fmt(r.base)}</td>
-      <td class="num">${fmt(r.ext)}</td><td class="num" style="color:var(--red)">${r.churn>0?'-'+fmt(r.churn):'$0'}</td>
-      <td class="num"><b>${fmt(r.nrrProj)}</b></td>${metaTd(r.obj.nrr||0,r.nrrProj)}<td class="num">${pctOf(r.nrrProj,r.cur)}</td>
-      <td class="num">${fmt(r.realExt.realizedQ)}${r.realExt.pending.length?` <span class="muted">(${r.realExt.pending.length} pend.)</span>`:''}</td>
-      ${metaTd(r.nrrProj,r.realNRR)}</tr>`;});
-  if(!csRows.length)html+=`<tr><td colspan="11"><span class="muted">Sin carteras de retención.</span></td></tr>`;
+      <td class="num">${growthPct(r.cur,r.nrrProj)}</td>
+      <td class="num">${fmt(r.base)}</td><td class="num">${fmt(r.csNewQ)}</td>
+      <td class="num"><b>${fmt(r.ext)}</b><br><span class="muted" style="font-size:10px">${fmt(r.realExt.realizedQ)} real${r.realExt.pending.length?' · '+r.realExt.pending.length+' pend.':''}</span></td>
+      <td class="num" style="color:var(--red)">${r.churn>0?'-'+fmt(r.churn):'$0'}</td>
+      <td class="num"><b>${fmt(r.nrrProj)}</b></td>${metaTd(r.obj.nrr||0,r.nrrProj)}</tr>`;});
+  if(!csRows.length)html+=`<tr><td colspan="9"><span class="muted">Sin carteras de retención.</span></td></tr>`;
   html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL CS</b></td><td class="num">${cA}</td>
-      <td class="num"><b>${fmt(cC)}</b></td><td class="num"><b>${fmt(cB)}</b></td>
-      <td class="num"><b>${fmt(cX)}</b></td><td class="num" style="color:var(--red)"><b>${cH>0?'-'+fmt(cH):'$0'}</b></td>
-      <td class="num"><b>${fmt(cN)}</b></td>${metaTd(mN,cN)}<td class="num"><b>${pctOf(cN,cC)}</b></td>
-      <td class="num"><b>${fmt(cXR)}</b>${cPend?` <span class="muted">(${cPend} pend.)</span>`:''}</td>
-      ${metaTd(cN,cNR)}</tr>
+      <td class="num">${growthPct(cC,cN)}</td>
+      <td class="num"><b>${fmt(cB)}</b></td><td class="num"><b>${fmt(cCSNew)}</b></td>
+      <td class="num"><b>${fmt(cX)}</b><br><span class="muted" style="font-size:10px">${fmt(cXR)} real${cPend?' · '+cPend+' pend.':''}</span></td>
+      <td class="num" style="color:var(--red)"><b>${cH>0?'-'+fmt(cH):'$0'}</b></td>
+      <td class="num"><b>${fmt(cN)}</b></td>${metaTd(mN,cN)}</tr>
     </tbody></table></div>
-    <p class="muted" style="margin-top:6px;font-size:11.5px">NRR = base + extensiones + ventas a cuentas existentes − bajas (sin logos nuevos). Las cuentas sin CS las cubre el vendedor, por eso puede aparecer en las dos tablas. "Ext. real" y "NRR real" salen de la serie sincronizada todas las noches — "pend." son contratos por vencer que todavía no se ve si se renovaron.</p>
+    <p class="muted" style="margin-top:6px;font-size:11.5px">Crecimiento = NRR proyectado vs revenue de ${(prev||q).label}. NRR proyectado = base + nuevas ventas en la cartera (de cualquiera que las cargó) + extensiones − bajas. "Extensiones" muestra lo proyectado arriba y lo que ya factura de verdad abajo. Las cuentas sin CS las cubre el vendedor, por eso puede aparecer en las dos tablas.</p>
 `;
   // cuentas y duplas (solo con revenue de la plataforma, que trae vendedor y CS por cuenta)
   if(Object.keys(DUPLA).length){
@@ -1540,9 +1552,10 @@ drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTrans
   async function showApp(session){
     // cargar perfil (rol + comercial)
     let prof=null;
-    try{const{data}=await SB.from('profiles').select('role,comercial_name,full_name,email').eq('id',session.user.id).single();prof=data;}catch(e){}
+    try{const{data}=await SB.from('profiles').select('role,comercial_name,full_name,email,can_view_consolidado').eq('id',session.user.id).single();prof=data;}catch(e){}
     CURRENT_USER={id:session.user.id,email:session.user.email,
       role:(prof&&prof.role)||'comercial',comercial_name:prof&&prof.comercial_name,
+      canViewConsolidado:!!(prof&&prof.can_view_consolidado),
       name:(prof&&prof.full_name)||session.user.email};
     document.getElementById('gate').style.display='none';
     document.getElementById('appwrap').style.display='';
