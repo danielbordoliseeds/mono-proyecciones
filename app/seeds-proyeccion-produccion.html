@@ -813,8 +813,8 @@ function showSub(which){
     const shared=sharedNewLines(o);
     if(shared.length){
       let sh=`<details class="logo-group" style="margin-top:16px" open><summary><span class="co">Compartidas con tu dupla</span><span class="lg-meta">${shared.length} línea${shared.length===1?'':'s'} que cargó la otra persona de la cuenta</span></summary>
-        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Rol</th><th>Cargó</th></tr></thead><tbody>`;
-      shared.forEach(l=>{sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td>${l._by.replace(' (Mono)','')}</td></tr>`;});
+        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Área</th><th>Rol</th><th>Cargó</th></tr></thead><tbody>`;
+      shared.forEach(l=>{sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${l.area||'<span class="muted">a definir</span>'}</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td><b>${l._by.replace(' (Mono)','')}</b></td></tr>`;});
       sh+='</tbody></table></details>';
       L.insertAdjacentHTML('beforeend',sh);
     }
