@@ -933,8 +933,11 @@ function sharedNewLines(o){
 }
 function renderNbLines(){
   const {o,accts}=window.__ctx;const st=getState(o);const c=$('#nb-list');if(!c)return;c.innerHTML='';
-  if(!st.newLines.length){c.innerHTML='<div class="empty" style="padding:14px">Sin líneas. Agregá una para proyectar nuevos.</div>';return;}
-  st.newLines.forEach((l,i)=>{
+  // filtro por cuenta (si está activo) + orden por cuándo arranca
+  const filtered=ACCT_FILTER?st.newLines.filter(l=>!l.isNew&&l.account===ACCT_FILTER):st.newLines;
+  if(!filtered.length){c.innerHTML=`<div class="empty" style="padding:14px">${ACCT_FILTER?'Sin líneas cargadas para esta cuenta.':'Sin líneas. Agregá una para proyectar nuevos.'}</div>`;return;}
+  const sorted=[...filtered].sort((a,b)=>(+a.start||0)-(+b.start||0));
+  sorted.forEach(l=>{
     const div=document.createElement('div');div.className='nb-line';
     const opts=`<option value="__new__" ${l.isNew?'selected':''}>➕ Logo nuevo (escribir empresa)</option>`
       +accts.map(a=>`<option ${!l.isNew&&l.account===a?'selected':''}>${a}</option>`).join('');
@@ -961,7 +964,7 @@ function renderNbLines(){
     div.querySelector('.nb-start').onchange=e=>{l.start=+e.target.value;upd();};
     div.querySelector('.nb-area').oninput=e=>{l.area=e.target.value;};
     div.querySelector('.nb-rol').oninput=e=>{l.rol=e.target.value;};
-    div.querySelector('.nb-del').onclick=()=>{st.newLines.splice(i,1);renderNbLines();recalc();};
+    div.querySelector('.nb-del').onclick=()=>{st.newLines.splice(st.newLines.indexOf(l),1);renderNbLines();recalc();};
   });
 }
 
