@@ -1552,10 +1552,14 @@ drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTrans
   async function showApp(session){
     // cargar perfil (rol + comercial)
     let prof=null;
-    try{const{data}=await SB.from('profiles').select('role,comercial_name,full_name,email,can_view_consolidado').eq('id',session.user.id).single();prof=data;}catch(e){}
+    try{const{data}=await SB.from('profiles').select('role,comercial_name,full_name,email').eq('id',session.user.id).single();prof=data;}catch(e){}
+    // campo opcional, en una consulta aparte: si la columna todavía no existe en la base
+    // (falta correr una migración nueva) no tiene que tumbar el login de nadie.
+    let canViewConsolidado=false;
+    try{const{data}=await SB.from('profiles').select('can_view_consolidado').eq('id',session.user.id).single();canViewConsolidado=!!(data&&data.can_view_consolidado);}catch(e){}
     CURRENT_USER={id:session.user.id,email:session.user.email,
       role:(prof&&prof.role)||'comercial',comercial_name:prof&&prof.comercial_name,
-      canViewConsolidado:!!(prof&&prof.can_view_consolidado),
+      canViewConsolidado,
       name:(prof&&prof.full_name)||session.user.email};
     document.getElementById('gate').style.display='none';
     document.getElementById('appwrap').style.display='';
