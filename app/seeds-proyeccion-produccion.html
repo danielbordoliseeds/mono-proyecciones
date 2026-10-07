@@ -132,7 +132,7 @@ details.howto b{color:var(--ink)}
 .userchip .logout:hover{background:#3a3a38}
 .saved-flag{font-size:11px;color:var(--green);font-weight:600;margin-left:10px}
 /* new business line builder */
-.nb-line{background:var(--g100);border-radius:var(--r-md);padding:14px;margin-bottom:10px;display:grid;grid-template-columns:1.5fr .6fr .9fr .6fr 1fr 1fr 1fr auto;gap:9px;align-items:end}
+.nb-line{background:var(--g100);border-radius:var(--r-md);padding:14px;margin-bottom:10px;display:grid;grid-template-columns:1.5fr .6fr .9fr .6fr 1fr 1fr 1fr .8fr auto;gap:9px;align-items:end}
 .nb-line.head{background:transparent;padding:0 14px;margin-bottom:2px}
 .nb-line.head label{font-size:10px;color:var(--g500);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
 @media(max-width:900px){.nb-line{grid-template-columns:1fr 1fr;}.nb-line.head{display:none}.nb-line label.fld{display:block}}
@@ -593,6 +593,7 @@ function renderComercial(o){
   const closed=isQuarterClosed(q);
   const rs=realSales(salesList,q);const rx=realExtensions(list,q,prev);
   const nbC=newBreakdown(o);
+  const crossNewC=newSalesIntoAccounts(new Set([...list,...salesList].map(c=>c.client)),q);
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
   const __save=window.__ctx;window.__ctx={o,q,ending,list};const extProjC=extExpected(o);window.__ctx=__save;
   const frozen=isFrozen(q);
@@ -605,7 +606,7 @@ function renderComercial(o){
     <label class="fld" style="margin:18px 0 10px">Real de la plataforma — ${closed?'resultado final':'en vivo'} (se actualiza solo, todas las noches)</label>
     <div class="kpis">
       ${kpi('Net revenue real '+q.label,fmt(sumQ(list,q)),closed?'resultado final':'a la fecha, va completándose','flat')}
-      ${kpi('Ventas realizadas',fmt(rs.total),'vs '+fmt(nbC.existQ+nbC.logoQ)+' proyectado',rs.total>=(nbC.existQ+nbC.logoQ)?'up':'down')}
+      ${kpi('Ventas realizadas',fmt(rs.total),'vs '+fmt(crossNewC.existQ+nbC.logoQ)+' proyectado',rs.total>=(crossNewC.existQ+nbC.logoQ)?'up':'down')}
       ${kpi('Extensiones realizadas',fmt(rx.realizedQ),'vs '+fmt(extProjC)+' proyectado',rx.realizedQ>=extProjC?'up':'down')}
       ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}
     </div>
@@ -804,17 +805,25 @@ function showSub(which){
   }
   else if(which==='new'){
     let h=`<p class="muted" style="margin-bottom:6px">Proyectá nuevos contratos. Elegí una cuenta existente o creá una nueva. Área y rol son <b>opcionales</b>. El <b>inicio</b> define cuánto del contrato cae dentro del trimestre (medio mes cuenta como 0,5); el TCV total no cambia.</p>
-      <div class="nb-line head"><label>Cuenta</label><label>Contratos</label><label>Ticket/mes</label><label>Dur. (m)</label><label>Inicio</label><label>Área (opc.)</label><label>Rol (opc.)</label><label></label></div>
+      <div class="nb-line head"><label>Cuenta</label><label>Contratos</label><label>Ticket/mes</label><label>Dur. (m)</label><label>Inicio</label><label>Área (opc.)</label><label>Rol (opc.)</label><label>Aporta Q</label><label></label></div>
       <div id="nb-list"></div>
+      <div class="nb-line nb-total" style="font-weight:700;border-top:2px solid var(--ink)">
+        <div>TOTAL</div><div class="num" id="nb-total-qty">0</div><div></div><div></div><div></div><div></div><div></div>
+        <div class="num" id="nb-total-q">$0</div><div></div>
+      </div>
       <button class="btn ghost sm" id="nb-add" style="margin-top:6px">+ Agregar línea</button>`;
     L.innerHTML=h;renderNbLines();
     if(frozen){L.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);}
     // lo que cargó la otra persona de la dupla en una cuenta compartida (solo lectura)
     const shared=sharedNewLines(o);
     if(shared.length){
+      let shQty=0,shQ=0;
       let sh=`<details class="logo-group" style="margin-top:16px" open><summary><span class="co">Compartidas con tu dupla</span><span class="lg-meta">${shared.length} línea${shared.length===1?'':'s'} que cargó la otra persona de la cuenta</span></summary>
-        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Área</th><th>Rol</th><th>Cargó</th></tr></thead><tbody>`;
-      shared.forEach(l=>{sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${l.area||'<span class="muted">a definir</span>'}</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td><b>${l._by.replace(' (Mono)','')}</b></td></tr>`;});
+        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Área</th><th>Rol</th><th>Cargó</th><th class="num">Aporta Q</th></tr></thead><tbody>`;
+      shared.forEach(l=>{const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
+        const aporta=qn*tk*Math.max(0,Math.min(du,3-st0));shQty+=qn;shQ+=aporta;
+        sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${l.area||'<span class="muted">a definir</span>'}</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td><b>${l._by.replace(' (Mono)','')}</b></td><td class="num">${fmt(aporta)}</td></tr>`;});
+      sh+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL</b></td><td class="num"><b>${shQty}</b></td><td></td><td></td><td></td><td></td><td></td><td class="num"><b>${fmt(shQ)}</b></td></tr>`;
       sh+='</tbody></table></details>';
       L.insertAdjacentHTML('beforeend',sh);
     }
@@ -950,6 +959,7 @@ function renderNbLines(){
       <div><select class="nb-start">${qStartOptions(l.start)}</select></div>
       <div><input type="text" class="nb-area" placeholder="—" value="${l.area||''}"></div>
       <div><input type="text" class="nb-rol" placeholder="—" value="${l.rol||''}"></div>
+      <div class="num nb-cell">$0</div>
       <button class="nb-del" title="Eliminar">×</button>`;
     c.appendChild(div);
     const upd=()=>{recalc();};
@@ -986,13 +996,14 @@ function newExpected(o,q){const b=newBreakdown(o);return b.existQ+b.logoQ;}
 // nuevas ventas que caen DENTRO de una cartera de retención dada (cuentas existentes de esa cartera),
 // sin importar quién las cargó — para que la tabla de CS muestre también lo que se vendió en sus cuentas.
 function newSalesIntoAccounts(accts,q){
-  let tot=0;
+  let existQ=0,existTCV=0;
   Object.values(STATE).forEach(st=>{(st.newLines||[]).forEach(l=>{
     if(l.isNew||!l.account||!accts.has(l.account))return;
     const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
-    tot+=qn*tk*Math.max(0,Math.min(du,3-st0));
+    existTCV+=qn*tk*du;
+    existQ+=qn*tk*Math.max(0,Math.min(du,3-st0));
   });});
-  return tot;
+  return{existQ,existTCV};
 }
 
 // crecimiento histórico QoQ de una cartera: promedio de los últimos hasta 4 trimestres cerrados antes de prevId
@@ -1060,7 +1071,12 @@ function opportunities(list,q,prev){
 function recalc(){
   const ctx=window.__ctx;if(!ctx)return;const{o,q,prev,curRev}=ctx;
   const base=ctx.base;const ext=extExpected(o);const nb=newBreakdown(o);const churn=totalChurn(o,base);
-  const total=base+ext+nb.existQ+nb.logoQ-churn;
+  // existentes: ventas nuevas en CUALQUIER cuenta de esta persona (retención o venta), las haya
+  // cargado quien las haya cargado — así el total coincide con lo que ya suma el Consolidado.
+  // logos nuevos no tienen cartera/dupla todavía, siguen siendo solo lo que esta persona cargó.
+  const myAccts=new Set([...(ctx.list||[]),...(ctx.salesList||[])].map(c=>c.client));
+  const crossNew=newSalesIntoAccounts(myAccts,q);
+  const total=base+ext+crossNew.existQ+nb.logoQ-churn;
   // update ext cells
   $$('#panL tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const cell=tr.querySelector('.ex-cell');
     if(!cell)return;const ch=tr.querySelector('.ex-c').checked;
@@ -1072,13 +1088,23 @@ function recalc(){
   $$('#panL tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const cell=tr.querySelector('.ch-cell');if(!cell)return;
     const c=(ctx.viewList||ctx.list||[]).find(x=>ckey(x)===k);const v=c?churnOf(c,q):null;
     cell.textContent=v==null?'$0':'-'+fmt(v);});
+  // update "aporta Q" + total de nuevos a vender (propia, editable)
+  let nbTotQty=0,nbTotQ=0;
+  $$('#nb-list .nb-line').forEach(div=>{
+    const cell=div.querySelector('.nb-cell');if(!cell)return;
+    const qn=+div.querySelector('.nb-qty').value||0,tk=+div.querySelector('.nb-ticket').value||0,
+      du=+div.querySelector('.nb-dur').value||0,st0=+div.querySelector('.nb-start').value||0;
+    const aporta=qn*tk*Math.max(0,Math.min(du,3-st0));
+    cell.textContent=fmt(aporta);nbTotQty+=qn;nbTotQ+=aporta;});
+  const nbtq=$('#nb-total-qty');if(nbtq)nbtq.textContent=nbTotQty;
+  const nbtQ=$('#nb-total-q');if(nbtQ)nbtQ.textContent=fmt(nbTotQ);
   const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
-  set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(nb.existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
+  set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(crossNew.existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
   set('#ps-churn',churn>0?'-'+fmt(churn):'$0');
   // objetivos vs proyectado
   const ob=OBJECTIVES[o]||{};
-  const nrrProj=base+ext+nb.existQ-churn;                 // NRR: cartera SIN logos, neto de bajas
-  const proj={existing:nb.existTCV,logos:nb.logoTCV,nrr:nrrProj};
+  const nrrProj=base+ext+crossNew.existQ-churn;            // NRR: cartera SIN logos, neto de bajas
+  const proj={existing:crossNew.existTCV,logos:nb.logoTCV,nrr:nrrProj};
   ['existing','logos','nrr'].forEach(k=>{
     set('#o-proj-'+k,fmt(proj[k]));
     const meta=ob[k]||0;const sem=$('#o-sem-'+k);
@@ -1106,7 +1132,7 @@ function renderConsolidated(){
     const save=window.__ctx;window.__ctx={o,q,ending,list};const ext=extExpected(o);const chn=totalChurn(o,b);window.__ctx=save;
     const nb=newBreakdown(o);
     const rs=realSales(sList,q);const rx=realExtensions(list,q,prev);
-    const csNewQ=list.length?newSalesIntoAccounts(new Set(list.map(c=>c.client)),q):0;
+    const csNewQ=list.length?newSalesIntoAccounts(new Set(list.map(c=>c.client)),q).existQ:0;
     tExist+=nb.existTCV;tLogo+=nb.logoTCV;tExt+=ext;tNewQ+=(nb.existQ+nb.logoQ);tChurn+=chn;
     nb.logos.forEach(l=>allLogos.push({o:o.replace(' (Mono)',''),...l}));
     (stO.newLines||[]).filter(l=>(+l.qty)>0).forEach(l=>allNew.push({o:o.replace(' (Mono)',''),
