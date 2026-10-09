@@ -574,27 +574,26 @@ function render(){
 function renderComercial(o){
   const act=activeAccounts();const list=contractsFor(o,act);const salesList=salesContractsFor(o,act);
   const q=projQ(),prev=baseQ();const st=getState(o);
-  const curRev=sumQ(list,prev||q),base=sumQ(list,q);
-  // quien solo vende no tiene base a su cargo: las tarjetas muestran sus cuentas como referencia
-  const salesOnly=!list.length&&salesList.length>0;const kList=salesOnly?salesList:list;
-  const kCur=sumQ(kList,prev||q),kBase=sumQ(kList,q);
+  // cartera combinada (retención + venta, sin duplicar): en esta transición CS y vendedor comparten
+  // objetivos de revenue y venta sobre la cuenta, así que el revenue real y la base se calculan sobre
+  // el total de la cuenta, sea quien sea quien la retiene o quien la vendió
+  const seen=new Set();const viewList=[...list,...salesList].filter(c=>{const k=ckey(c);if(seen.has(k))return false;seen.add(k);return true;});
+  const salesOnly=!list.length&&salesList.length>0;
+  const curRev=sumQ(viewList,prev||q),base=sumQ(viewList,q);
   const refIdx=(prev||q).idx[2];
-  const activeC=kList.filter(c=>c.series[refIdx]>0);
+  const activeC=viewList.filter(c=>c.series[refIdx]>0);
   const avg=activeC.length?activeC.reduce((a,c)=>a+c.series[refIdx],0)/activeC.length:0;
   const activeClients=new Set(activeC.map(c=>c.client));
   const revRef=activeC.reduce((a,c)=>a+c.series[refIdx],0);
   const avgClient=activeClients.size?revRef/activeClients.size:0;
-  const ending=endingCandidates(list,q,prev);
-  // lo que ve y puede marcar: contratos de todas sus cuentas (como vendedor o como CS)
-  const seen=new Set();const viewList=[...list,...salesList].filter(c=>{const k=ckey(c);if(seen.has(k))return false;seen.add(k);return true;});
   const viewEnding=endingCandidates(viewList,q,prev);
   const g=growth(),target=curRev*(1+g/100);
   const accts=[...acctsOf(o,act)].sort();
   const closed=isQuarterClosed(q);
-  const rs=realSales(salesList,q);const rx=realExtensions(list,q,prev);
+  const rs=realSales(viewList,q);const rx=realExtensions(viewList,q,prev);
   const nbC=newBreakdown(o);
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
-  const __save=window.__ctx;window.__ctx={o,q,ending,list};const extProjC=extExpected(o);window.__ctx=__save;
+  const __save=window.__ctx;window.__ctx={o,q,viewEnding,list};const extProjC=extExpected(o);window.__ctx=__save;
   const frozen=isFrozen(q);
 
   let html=`<h2><span class="n">3</span>${o} · ${q.label}</h2>
@@ -604,14 +603,14 @@ function renderComercial(o){
     ${frozen?`<div class="section-note" style="border-color:var(--red)">🔒 Proyección de ${q.label} cerrada el ${new Date(DEADLINES[q.id]).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'})} — a partir de acá se contrasta directo contra el resultado real, ya no se puede editar.</div>`:''}
     <label class="fld" style="margin:18px 0 10px">Real de la plataforma — ${closed?'resultado final':'en vivo'} (se actualiza solo, todas las noches)</label>
     <div class="kpis">
-      ${kpi('Net revenue real '+q.label,fmt(sumQ(list,q)),closed?'resultado final':'a la fecha, va completándose','flat')}
+      ${kpi('Net revenue real '+q.label,fmt(base),closed?'resultado final':'a la fecha, va completándose','flat')}
       ${kpi('Ventas realizadas',fmt(rs.total),'vs '+fmt(nbC.existQ+nbC.logoQ)+' proyectado',rs.total>=(nbC.existQ+nbC.logoQ)?'up':'down')}
       ${kpi('Extensiones realizadas',fmt(rx.realizedQ),'vs '+fmt(extProjC)+' proyectado',rx.realizedQ>=extProjC?'up':'down')}
       ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}
     </div>
     <div class="kpis">
-      ${kpi('Revenue '+(prev?prev.label:q.label),fmt(kCur),salesOnly?'tus cuentas · referencia':'trimestre base','flat')}
-      ${kpi('Base contratada '+q.label,fmt(kBase),salesOnly?'la proyecta el CS':pct(kBase,kCur),salesOnly?'flat':(kBase>=kCur?'up':'down'))}
+      ${kpi('Revenue '+(prev?prev.label:q.label),fmt(curRev),'trimestre base','flat')}
+      ${kpi('Base contratada '+q.label,fmt(base),pct(base,curRev),base>=curRev?'up':'down')}
       ${kpi('Ticket prom./contrato',fmt(avg),activeC.length+' contratos','flat')}
       ${kpi('Contratos a renovar',viewEnding.length+' contratos',fmt(sumQ(viewEnding,prev||q))+' en juego','down')}
     </div>`;
@@ -652,30 +651,33 @@ function renderComercial(o){
   const nrrSuggHint=nrrSugg?`<div class="muted" style="font-size:10.5px;margin-top:3px">Sugerido: <a href="#" id="nrr-suggest" data-v="${nrrSugg.value}" style="color:var(--green)">${fmt(nrrSugg.value)}</a> (${nrrSugg.growth>=0?'+':''}${(nrrSugg.growth*100).toFixed(1)}% vs ${prev?prev.label:'Q anterior'}, mín. 7%)</div>`:'';
   // Q cerrado (fecha límite pasada): la tabla editable de objetivos se reemplaza por el
   // scoreboard de cumplimiento (real vs meta) — ya no hay nada que cargar, solo leer.
-  const realNRRv=sumQ(list,q);
+  const realNRRv=base;
+  // logos nuevos sigue siendo objetivo exclusivo del vendedor: si no tiene cartera de venta propia
+  // (es CS puro), no le mostramos ese objetivo ni lo contamos en su cumplimiento
+  const canHaveLogos=salesList.length>0;
   const objBlock=frozen?(()=>{
       const parts=[];
       if(ob.existing)parts.push(completionPct(rs.existQ,ob.existing));
-      if(ob.logos)parts.push(completionPct(rs.logoQ,ob.logos));
+      if(canHaveLogos&&ob.logos)parts.push(completionPct(rs.logoQ,ob.logos));
       if(ob.nrr)parts.push(completionPct(realNRRv,ob.nrr));
       const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
       return `<h3 style="margin-top:20px">🏆 Cumplimiento ${q.label} <span style="color:#888;font-weight:500;text-transform:none">· Q cerrado</span></h3>
         ${overall!=null?`<div style="font-size:34px;font-weight:800;color:${completionColor(overall)};margin:4px 0 10px">${overall}%</div>`:'<div class="muted" style="margin:4px 0 10px">Sin metas cargadas</div>'}
         ${ob.existing?meterRow('N. ventas existentes',rs.existQ,ob.existing):''}
-        ${ob.logos?meterRow('N. ventas logos',rs.logoQ,ob.logos):''}
+        ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoQ,ob.logos):''}
         ${ob.nrr?meterRow('NRR · revenue Q',realNRRv,ob.nrr):''}`;
     })():`<h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
     <table class="objt">
       <tr><th>Objetivo</th><th>Meta</th><th>Proyectado</th><th></th></tr>
       <tr><td>N. ventas existentes (TCV)</td><td>${metaCell('existing')}</td><td class="num" id="o-proj-existing">$0</td><td class="sem" id="o-sem-existing"></td></tr>
-      <tr><td>N. ventas logos (TCV)</td><td>${metaCell('logos')}</td><td class="num" id="o-proj-logos">$0</td><td class="sem" id="o-sem-logos"></td></tr>
+      ${canHaveLogos?`<tr><td>N. ventas logos (TCV)</td><td>${metaCell('logos')}</td><td class="num" id="o-proj-logos">$0</td><td class="sem" id="o-sem-logos"></td></tr>`:''}
       <tr><td>NRR · revenue Q (sin logos)</td><td>${metaCell('nrr')}${nrrSuggHint}</td><td class="num" id="o-proj-nrr">$0</td><td class="sem" id="o-sem-nrr"></td></tr>
     </table>
     <div id="o-nrr-pct" style="font-size:11.5px;color:#bdbdbd;margin-top:7px"></div>
     ${isAdmin?'<div class="row-actions"><button class="btn ghost" id="btn-obj">Guardar objetivos</button><span class="saved-flag" id="obj-flag"></span></div>':''}`;
   html+=`<div class="proj-summary">
     <h3>Composición Q · ${q.label}</h3>
-    <div class="ps-row"><span class="l">Base contratada${salesOnly?' <span class="muted" style="font-size:10px">(tus cuentas, la retención la lleva el CS)</span>':''}</span><span class="r" id="ps-base">$0</span></div>
+    <div class="ps-row"><span class="l">Base contratada</span><span class="r" id="ps-base">$0</span></div>
     <div class="ps-row"><span class="l">+ Extensiones</span><span class="r" id="ps-ext">$0</span></div>
     <div class="ps-row"><span class="l">+ N. ventas existentes (Q)</span><span class="r" id="ps-newx">$0</span></div>
     <div class="ps-row"><span class="l">+ N. ventas logos (Q)</span><span class="r" id="ps-newl">$0</span></div>
@@ -685,7 +687,7 @@ function renderComercial(o){
     <div class="row-actions">${frozen?'':'<button class="btn primary" id="btn-save">💾 Guardar proyección</button>'}<button class="btn ghost" id="btn-exp">⬇ Exportar Excel</button><span class="saved-flag" id="save-flag"></span></div>
   </div></div>`;
   $('#panel').innerHTML=html;
-  window.__ctx={o,q,prev,list,salesList,ending,viewList,viewEnding,accts,target,curRev,base,avg,avgClient};
+  window.__ctx={o,q,prev,list,salesList,viewList,viewEnding,accts,target,curRev,base,avg,avgClient};
   const af=$('#acct-filter');if(af)af.onchange=e=>{ACCT_FILTER=e.target.value;
     const cur=$$('#panel .tab').find(t=>t.classList.contains('active'));showSub(cur?cur.dataset.t:(salesOnly?'opp':'ext'));};
   // sub-tabs
@@ -982,7 +984,7 @@ function renderNbLines(){
 }
 
 function extExpected(o){
-  let tot=0;const {ending,q}=window.__ctx||{};
+  let tot=0;const ctx=window.__ctx||{};const ending=ctx.viewEnding||ctx.ending,q=ctx.q;
   if(ending&&q)ending.forEach(c=>{tot+=extOf(c,q).aporta;});
   return tot;
 }
