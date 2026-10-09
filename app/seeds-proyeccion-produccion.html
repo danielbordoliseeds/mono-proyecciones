@@ -519,7 +519,7 @@ function setupDeadlineCtrl(){
 function buildTabs(){
   const act=activeAccounts();const ct=$('#ctabs');ct.innerHTML='';
   const role=(CURRENT_USER&&CURRENT_USER.role)||'admin';
-  const canSeeAll=role==='admin'||role==='talent'||!!(CURRENT_USER&&CURRENT_USER.canViewConsolidado);
+  const canSeeAll=true; // el Consolidado lo puede ver cualquier persona logueada
   const mine=CURRENT_USER&&CURRENT_USER.comercial_name;
   const q=projQ(),prev=baseQ();
   // consolidated (admin y talent)
@@ -1107,6 +1107,53 @@ function recalc(){
     np.innerHTML=`NRR proyectado: <b style="color:#fff">${pp}%</b> del Q anterior${metaN?` &nbsp;·&nbsp; meta ${mp}% (${fmt(metaN)})`:''}`;}
 }
 
+// ===== GRÁFICO: Revenue real por trimestre =====
+// Directo de la serie sincronizada (CONTRACTS), sin filtrar por cartera de nadie: es el revenue
+// real de toda la empresa, trimestre a trimestre, desglosado por stream (Seeder/Contractor —
+// hoy no tenemos más desglose que ctype sincronizado desde la plataforma).
+function revenueByQuarter(){
+  return QUARTERS.map(q=>{
+    let seeder=0,contractor=0;
+    CONTRACTS.forEach(c=>{
+      const v=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);
+      if(c.ctype==='CONTRACTOR')contractor+=v;else seeder+=v;
+    });
+    return{label:q.label,seeder,contractor,total:seeder+contractor};
+  });
+}
+function niceMax(v){
+  if(v<=0)return 100;
+  const mag=Math.pow(10,Math.floor(Math.log10(v)));const n=v/mag;
+  const step=n<=1?1:n<=2?2:n<=5?5:10;
+  return step*mag;
+}
+function revenueChartSVG(data){
+  if(!data.length||!data.some(d=>d.total>0))return '<div class="empty">Todavía no hay revenue sincronizado.</div>';
+  const W=Math.max(560,data.length*104+72),H=300;
+  const padL=58,padR=14,padT=20,padB=38;
+  const plotW=W-padL-padR,plotH=H-padT-padB;
+  const maxV=niceMax(Math.max(...data.map(d=>d.total))*1.12);
+  const gap=plotW/data.length,barW=Math.min(60,gap*0.56);
+  const y=v=>padT+plotH-(v/maxV)*plotH;
+  let grid='';
+  for(let i=0;i<=4;i++){const v=maxV/4*i,yy=y(v);
+    grid+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" stroke="#EAEAE7" stroke-width="1"/>
+      <text x="${padL-8}" y="${(yy+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#9A9A96">${fmt(v)}</text>`;}
+  let bars='';
+  data.forEach((d,i)=>{
+    const cx=padL+gap*i+gap/2,x=cx-barW/2;
+    const hS=(d.seeder/maxV)*plotH,hC=(d.contractor/maxV)*plotH;
+    const yS=padT+plotH-hS,yC=yS-hC;
+    bars+=`<g>
+      ${d.contractor>0?`<rect x="${x.toFixed(1)}" y="${yC.toFixed(1)}" width="${barW.toFixed(1)}" height="${hC.toFixed(1)}" rx="3" fill="var(--purple)"><title>${d.label} · Contractor: ${fmt(d.contractor)}</title></rect>`:''}
+      ${d.seeder>0?`<rect x="${x.toFixed(1)}" y="${yS.toFixed(1)}" width="${barW.toFixed(1)}" height="${hS.toFixed(1)}" rx="3" fill="var(--blue)"><title>${d.label} · Seeder: ${fmt(d.seeder)}</title></rect>`:''}
+      <text x="${cx.toFixed(1)}" y="${(yC-8).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">${fmt(d.total)}</text>
+      <text x="${cx.toFixed(1)}" y="${(H-padB+20).toFixed(1)}" text-anchor="middle" font-size="11" fill="#6B6B68">${d.label}</text>
+    </g>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;font-family:var(--font)">${grid}${bars}</svg>`;
+}
+
 // ===== CONSOLIDADO =====
 function renderConsolidated(){
   const act=activeAccounts();const q=projQ(),prev=baseQ();
@@ -1142,6 +1189,9 @@ function renderConsolidated(){
     <p class="sub">${act.size} cuentas activas · ${salesRows.length} en ventas y ${csRows.length} en Customer Success. Meta de retención +${g}%.</p>
     <div class="section-note">Resumen de todos (solo lectura). <b>Para proyectar, entrá a la pestaña de cada persona</b>. Lo que cada uno carga se suma acá solo.</div>
     <div class="row-actions" style="margin-top:12px"><button class="btn primary" id="cons-exp">⬇ Exportar Excel (Consolidado + 1 pestaña por comercial)</button></div>
+    <label class="fld" style="margin:20px 0 10px">Revenue real por trimestre</label>
+    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Contractor</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches, revenue real de toda la empresa (no depende de cartera ni de quién la proyecta).</div>
+    <div class="card" style="padding:16px 18px;margin-top:0">${revenueChartSVG(revenueByQuarter())}</div>
     <div class="kpis" style="margin-top:14px">
       ${kpi('Nuevas ventas · existentes',fmt(tExist),'TCV proyectado','up')}
       ${kpi('Nuevas ventas · logos',fmt(tLogo),allLogos.length+' logos nuevos','up')}
