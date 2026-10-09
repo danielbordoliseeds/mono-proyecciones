@@ -132,7 +132,7 @@ details.howto b{color:var(--ink)}
 .userchip .logout:hover{background:#3a3a38}
 .saved-flag{font-size:11px;color:var(--green);font-weight:600;margin-left:10px}
 /* new business line builder */
-.nb-line{background:var(--g100);border-radius:var(--r-md);padding:14px;margin-bottom:10px;display:grid;grid-template-columns:1.5fr .6fr .9fr .6fr 1fr 1fr 1fr .8fr auto;gap:9px;align-items:end}
+.nb-line{background:var(--g100);border-radius:var(--r-md);padding:14px;margin-bottom:10px;display:grid;grid-template-columns:1.5fr .6fr .9fr .6fr 1fr 1fr 1fr .8fr .8fr auto;gap:9px;align-items:end}
 .nb-line.head{background:transparent;padding:0 14px;margin-bottom:2px}
 .nb-line.head label{font-size:10px;color:var(--g500);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
 @media(max-width:900px){.nb-line{grid-template-columns:1fr 1fr;}.nb-line.head{display:none}.nb-line label.fld{display:block}}
@@ -593,7 +593,6 @@ function renderComercial(o){
   const closed=isQuarterClosed(q);
   const rs=realSales(salesList,q);const rx=realExtensions(list,q,prev);
   const nbC=newBreakdown(o);
-  const crossNewC=newSalesIntoAccounts(new Set([...list,...salesList].map(c=>c.client)),q);
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
   const __save=window.__ctx;window.__ctx={o,q,ending,list};const extProjC=extExpected(o);window.__ctx=__save;
   const frozen=isFrozen(q);
@@ -606,7 +605,7 @@ function renderComercial(o){
     <label class="fld" style="margin:18px 0 10px">Real de la plataforma — ${closed?'resultado final':'en vivo'} (se actualiza solo, todas las noches)</label>
     <div class="kpis">
       ${kpi('Net revenue real '+q.label,fmt(sumQ(list,q)),closed?'resultado final':'a la fecha, va completándose','flat')}
-      ${kpi('Ventas realizadas',fmt(rs.total),'vs '+fmt(crossNewC.existQ+nbC.logoQ)+' proyectado',rs.total>=(crossNewC.existQ+nbC.logoQ)?'up':'down')}
+      ${kpi('Ventas realizadas',fmt(rs.total),'vs '+fmt(nbC.existQ+nbC.logoQ)+' proyectado',rs.total>=(nbC.existQ+nbC.logoQ)?'up':'down')}
       ${kpi('Extensiones realizadas',fmt(rx.realizedQ),'vs '+fmt(extProjC)+' proyectado',rx.realizedQ>=extProjC?'up':'down')}
       ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}
     </div>
@@ -676,7 +675,7 @@ function renderComercial(o){
     ${isAdmin?'<div class="row-actions"><button class="btn ghost" id="btn-obj">Guardar objetivos</button><span class="saved-flag" id="obj-flag"></span></div>':''}`;
   html+=`<div class="proj-summary">
     <h3>Composición Q · ${q.label}</h3>
-    <div class="ps-row"><span class="l">Base contratada</span><span class="r" id="ps-base">$0</span></div>
+    <div class="ps-row"><span class="l">Base contratada${salesOnly?' <span class="muted" style="font-size:10px">(tus cuentas, la retención la lleva el CS)</span>':''}</span><span class="r" id="ps-base">$0</span></div>
     <div class="ps-row"><span class="l">+ Extensiones</span><span class="r" id="ps-ext">$0</span></div>
     <div class="ps-row"><span class="l">+ N. ventas existentes (Q)</span><span class="r" id="ps-newx">$0</span></div>
     <div class="ps-row"><span class="l">+ N. ventas logos (Q)</span><span class="r" id="ps-newl">$0</span></div>
@@ -805,27 +804,30 @@ function showSub(which){
   }
   else if(which==='new'){
     let h=`<p class="muted" style="margin-bottom:6px">Proyectá nuevos contratos. Elegí una cuenta existente o creá una nueva. Área y rol son <b>opcionales</b>. El <b>inicio</b> define cuánto del contrato cae dentro del trimestre (medio mes cuenta como 0,5); el TCV total no cambia.</p>
-      <div class="nb-line head"><label>Cuenta</label><label>Contratos</label><label>Ticket/mes</label><label>Dur. (m)</label><label>Inicio</label><label>Área (opc.)</label><label>Rol (opc.)</label><label>Aporta Q</label><label></label></div>
+      <div class="nb-line head"><label>Cuenta</label><label>Contratos</label><label>Ticket/mes</label><label>Dur. (m)</label><label>Inicio</label><label>Área (opc.)</label><label>Rol (opc.)</label><label>TCV total</label><label>Aporta Q</label><label></label></div>
       <div id="nb-list"></div>
       <div class="nb-line nb-total" style="font-weight:700;border-top:2px solid var(--ink)">
         <div>TOTAL</div><div class="num" id="nb-total-qty">0</div><div></div><div></div><div></div><div></div><div></div>
-        <div class="num" id="nb-total-q">$0</div><div></div>
+        <div class="num" id="nb-total-tcv">$0</div><div class="num" id="nb-total-q">$0</div><div></div>
       </div>
       <button class="btn ghost sm" id="nb-add" style="margin-top:6px">+ Agregar línea</button>`;
     L.innerHTML=h;renderNbLines();
     if(frozen){L.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);}
     // lo que cargó la otra persona de la dupla en una cuenta compartida (solo lectura)
-    const shared=sharedNewLines(o);
+    const sharedAll=sharedNewLines(o);
+    const shared=ACCT_FILTER?sharedAll.filter(l=>l.account===ACCT_FILTER):sharedAll;
     if(shared.length){
-      let shQty=0,shQ=0;
+      let shQty=0,shQ=0,shTCV=0;
       let sh=`<details class="logo-group" style="margin-top:16px" open><summary><span class="co">Compartidas con tu dupla</span><span class="lg-meta">${shared.length} línea${shared.length===1?'':'s'} que cargó la otra persona de la cuenta</span></summary>
-        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Área</th><th>Rol</th><th>Cargó</th><th class="num">Aporta Q</th></tr></thead><tbody>`;
-      shared.forEach(l=>{const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
-        const aporta=qn*tk*Math.max(0,Math.min(du,3-st0));shQty+=qn;shQ+=aporta;
-        sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${l.area||'<span class="muted">a definir</span>'}</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td><b>${l._by.replace(' (Mono)','')}</b></td><td class="num">${fmt(aporta)}</td></tr>`;});
-      sh+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL</b></td><td class="num"><b>${shQty}</b></td><td></td><td></td><td></td><td></td><td></td><td class="num"><b>${fmt(shQ)}</b></td></tr>`;
+        <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Ticket/mes</th><th class="num">Dur. (m)</th><th>Inicio</th><th>Área</th><th>Rol</th><th>Cargó</th><th class="num">TCV total</th><th class="num">Aporta Q</th></tr></thead><tbody>`;
+      shared.sort((a,b)=>(+a.start||0)-(+b.start||0)).forEach(l=>{const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
+        const aporta=qn*tk*Math.max(0,Math.min(du,3-st0));const tcv=qn*tk*du;shQty+=qn;shQ+=aporta;shTCV+=tcv;
+        sh+=`<tr><td>${l.account}</td><td class="num">${l.qty}</td><td class="num">${fmt(+l.ticket)}</td><td class="num">${l.dur}m</td><td>${startText(st0,q)}</td><td>${l.area||'<span class="muted">a definir</span>'}</td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td><b>${l._by.replace(' (Mono)','')}</b></td><td class="num">${fmt(tcv)}</td><td class="num">${fmt(aporta)}</td></tr>`;});
+      sh+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL</b></td><td class="num"><b>${shQty}</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num"><b>${fmt(shTCV)}</b></td><td class="num"><b>${fmt(shQ)}</b></td></tr>`;
       sh+='</tbody></table></details>';
       L.insertAdjacentHTML('beforeend',sh);
+    }else if(ACCT_FILTER&&sharedAll.length){
+      L.insertAdjacentHTML('beforeend','<p class="muted" style="margin-top:16px">Tu dupla no cargó nada para esta cuenta.</p>');
     }
     // referencia: ticket promedio por cuenta
     const tm=acctTicketMap();const ents=Object.entries(tm).sort((a,b)=>b[1]-a[1]);
@@ -959,6 +961,7 @@ function renderNbLines(){
       <div><select class="nb-start">${qStartOptions(l.start)}</select></div>
       <div><input type="text" class="nb-area" placeholder="—" value="${l.area||''}"></div>
       <div><input type="text" class="nb-rol" placeholder="—" value="${l.rol||''}"></div>
+      <div class="num nb-tcv-cell">$0</div>
       <div class="num nb-cell">$0</div>
       <button class="nb-del" title="Eliminar">×</button>`;
     c.appendChild(div);
@@ -993,18 +996,6 @@ function newBreakdown(o){
   return{existTCV,logoTCV,existQ,logoQ,logos,tcvTotal:existTCV+logoTCV};
 }
 function newExpected(o,q){const b=newBreakdown(o);return b.existQ+b.logoQ;}
-// nuevas ventas que caen DENTRO de una cartera de retención dada (cuentas existentes de esa cartera),
-// sin importar quién las cargó — para que la tabla de CS muestre también lo que se vendió en sus cuentas.
-function newSalesIntoAccounts(accts,q){
-  let existQ=0,existTCV=0;
-  Object.values(STATE).forEach(st=>{(st.newLines||[]).forEach(l=>{
-    if(l.isNew||!l.account||!accts.has(l.account))return;
-    const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
-    existTCV+=qn*tk*du;
-    existQ+=qn*tk*Math.max(0,Math.min(du,3-st0));
-  });});
-  return{existQ,existTCV};
-}
 
 // crecimiento histórico QoQ de una cartera: promedio de los últimos hasta 4 trimestres cerrados antes de prevId
 function histGrowthRate(list,prevId){
@@ -1071,12 +1062,7 @@ function opportunities(list,q,prev){
 function recalc(){
   const ctx=window.__ctx;if(!ctx)return;const{o,q,prev,curRev}=ctx;
   const base=ctx.base;const ext=extExpected(o);const nb=newBreakdown(o);const churn=totalChurn(o,base);
-  // existentes: ventas nuevas en CUALQUIER cuenta de esta persona (retención o venta), las haya
-  // cargado quien las haya cargado — así el total coincide con lo que ya suma el Consolidado.
-  // logos nuevos no tienen cartera/dupla todavía, siguen siendo solo lo que esta persona cargó.
-  const myAccts=new Set([...(ctx.list||[]),...(ctx.salesList||[])].map(c=>c.client));
-  const crossNew=newSalesIntoAccounts(myAccts,q);
-  const total=base+ext+crossNew.existQ+nb.logoQ-churn;
+  const total=base+ext+nb.existQ+nb.logoQ-churn;
   // update ext cells
   $$('#panL tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const cell=tr.querySelector('.ex-cell');
     if(!cell)return;const ch=tr.querySelector('.ex-c').checked;
@@ -1088,23 +1074,25 @@ function recalc(){
   $$('#panL tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const cell=tr.querySelector('.ch-cell');if(!cell)return;
     const c=(ctx.viewList||ctx.list||[]).find(x=>ckey(x)===k);const v=c?churnOf(c,q):null;
     cell.textContent=v==null?'$0':'-'+fmt(v);});
-  // update "aporta Q" + total de nuevos a vender (propia, editable)
-  let nbTotQty=0,nbTotQ=0;
+  // update "TCV total"/"aporta Q" + total de nuevos a vender (propia, editable)
+  let nbTotQty=0,nbTotQ=0,nbTotTcv=0;
   $$('#nb-list .nb-line').forEach(div=>{
     const cell=div.querySelector('.nb-cell');if(!cell)return;
     const qn=+div.querySelector('.nb-qty').value||0,tk=+div.querySelector('.nb-ticket').value||0,
       du=+div.querySelector('.nb-dur').value||0,st0=+div.querySelector('.nb-start').value||0;
-    const aporta=qn*tk*Math.max(0,Math.min(du,3-st0));
-    cell.textContent=fmt(aporta);nbTotQty+=qn;nbTotQ+=aporta;});
+    const aporta=qn*tk*Math.max(0,Math.min(du,3-st0));const tcv=qn*tk*du;
+    const tcvCell=div.querySelector('.nb-tcv-cell');if(tcvCell)tcvCell.textContent=fmt(tcv);
+    cell.textContent=fmt(aporta);nbTotQty+=qn;nbTotQ+=aporta;nbTotTcv+=tcv;});
   const nbtq=$('#nb-total-qty');if(nbtq)nbtq.textContent=nbTotQty;
   const nbtQ=$('#nb-total-q');if(nbtQ)nbtQ.textContent=fmt(nbTotQ);
+  const nbtT=$('#nb-total-tcv');if(nbtT)nbtT.textContent=fmt(nbTotTcv);
   const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
-  set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(crossNew.existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
+  set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(nb.existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
   set('#ps-churn',churn>0?'-'+fmt(churn):'$0');
   // objetivos vs proyectado
   const ob=OBJECTIVES[o]||{};
-  const nrrProj=base+ext+crossNew.existQ-churn;            // NRR: cartera SIN logos, neto de bajas
-  const proj={existing:crossNew.existTCV,logos:nb.logoTCV,nrr:nrrProj};
+  const nrrProj=base+ext+nb.existQ-churn;                  // NRR: cartera SIN logos, neto de bajas
+  const proj={existing:nb.existTCV,logos:nb.logoTCV,nrr:nrrProj};
   ['existing','logos','nrr'].forEach(k=>{
     set('#o-proj-'+k,fmt(proj[k]));
     const meta=ob[k]||0;const sem=$('#o-sem-'+k);
@@ -1132,7 +1120,6 @@ function renderConsolidated(){
     const save=window.__ctx;window.__ctx={o,q,ending,list};const ext=extExpected(o);const chn=totalChurn(o,b);window.__ctx=save;
     const nb=newBreakdown(o);
     const rs=realSales(sList,q);const rx=realExtensions(list,q,prev);
-    const csNewQ=list.length?newSalesIntoAccounts(new Set(list.map(c=>c.client)),q).existQ:0;
     tExist+=nb.existTCV;tLogo+=nb.logoTCV;tExt+=ext;tNewQ+=(nb.existQ+nb.logoQ);tChurn+=chn;
     nb.logos.forEach(l=>allLogos.push({o:o.replace(' (Mono)',''),...l}));
     (stO.newLines||[]).filter(l=>(+l.qty)>0).forEach(l=>allNew.push({o:o.replace(' (Mono)',''),
@@ -1141,9 +1128,9 @@ function renderConsolidated(){
       tcv:(+l.qty)*(+l.ticket)*(+l.dur)}));
     rows.push({o,inSales:sList.length>0||hasNew,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
-      cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,csNewQ,
+      cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
       realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExt:rx,realNRR:sumQ(list,q),
-      nrrProj:b+ext+csNewQ-chn,obj:OBJECTIVES[o]||{}});});
+      nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
   const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
   const nm=o=>o.replace(' (Mono)','');
@@ -1220,33 +1207,34 @@ function renderConsolidated(){
     allLogos.forEach(l=>{html+=`<tr><td>${l.o}</td><td><b>${l.name}</b></td><td>${l.rol||'<span class="muted">a definir</span>'}</td><td class="num">${l.qty}</td><td class="num">${fmt(l.tcv)}</td></tr>`;});
     html+='</tbody></table></details>';
   }
-  // ---- Equipo de Customer Success: crecimiento, extensiones, nuevas ventas en la cartera y NRR ----
-  let cC=0,cB=0,cCSNew=0,cX=0,cXR=0,cPend=0,cH=0,cN=0,mN=0,cA=0;
+  // ---- Equipo de Customer Success: crecimiento, extensiones y NRR (cada uno mide solo lo suyo,
+  // sin sumar lo de su dupla, para no duplicar en el TOTAL cuando una cuenta se comparte) ----
+  let cC=0,cB=0,cX=0,cXR=0,cPend=0,cH=0,cN=0,mN=0,cA=0;
   html+=`<label class="fld" style="margin:24px 0 10px">Equipo de Customer Success · retención</label>
     <div style="overflow-x:auto"><table><thead><tr>
       <th>CS</th><th class="num">Ctas</th><th class="num">Crecimiento</th>
-      <th class="num">Base ${q.label}</th><th class="num">+ Nuevas ventas</th>
+      <th class="num">Base ${q.label}</th>
       <th class="num">Extensiones (proy. / real)</th><th class="num">− Bajas</th>
       <th class="num">NRR proyectado</th>
     </tr></thead><tbody>`;
   csRows.sort((a,b)=>b.nrrProj-a.nrrProj).forEach(r=>{
-    cC+=r.cur;cB+=r.base;cCSNew+=r.csNewQ;cX+=r.ext;cXR+=r.realExt.realizedQ;cPend+=r.realExt.pending.length;
+    cC+=r.cur;cB+=r.base;cX+=r.ext;cXR+=r.realExt.realizedQ;cPend+=r.realExt.pending.length;
     cH+=r.churn;cN+=r.nrrProj;mN+=r.obj.nrr||0;cA+=r.csAccts;
     html+=`<tr><td><b>${nm(r.o)}</b></td><td class="num">${r.csAccts}</td>
       <td class="num">${growthPct(r.cur,r.nrrProj)}</td>
-      <td class="num">${fmt(r.base)}</td><td class="num">${fmt(r.csNewQ)}</td>
+      <td class="num">${fmt(r.base)}</td>
       <td class="num"><b>${fmt(r.ext)}</b><br><span class="muted" style="font-size:10px">${fmt(r.realExt.realizedQ)} real${r.realExt.pending.length?' · '+r.realExt.pending.length+' pend.':''}</span></td>
       <td class="num" style="color:var(--red)">${r.churn>0?'-'+fmt(r.churn):'$0'}</td>
       <td class="num"><b>${fmt(r.nrrProj)}</b></td>${metaTd(r.obj.nrr||0,r.nrrProj)}</tr>`;});
-  if(!csRows.length)html+=`<tr><td colspan="9"><span class="muted">Sin carteras de retención.</span></td></tr>`;
+  if(!csRows.length)html+=`<tr><td colspan="8"><span class="muted">Sin carteras de retención.</span></td></tr>`;
   html+=`<tr style="border-top:2px solid var(--ink)"><td><b>TOTAL CS</b></td><td class="num">${cA}</td>
       <td class="num">${growthPct(cC,cN)}</td>
-      <td class="num"><b>${fmt(cB)}</b></td><td class="num"><b>${fmt(cCSNew)}</b></td>
+      <td class="num"><b>${fmt(cB)}</b></td>
       <td class="num"><b>${fmt(cX)}</b><br><span class="muted" style="font-size:10px">${fmt(cXR)} real${cPend?' · '+cPend+' pend.':''}</span></td>
       <td class="num" style="color:var(--red)"><b>${cH>0?'-'+fmt(cH):'$0'}</b></td>
       <td class="num"><b>${fmt(cN)}</b></td>${metaTd(mN,cN)}</tr>
     </tbody></table></div>
-    <p class="muted" style="margin-top:6px;font-size:11.5px">Crecimiento = NRR proyectado vs revenue de ${(prev||q).label}. NRR proyectado = base + nuevas ventas en la cartera (de cualquiera que las cargó) + extensiones − bajas. "Extensiones" muestra lo proyectado arriba y lo que ya factura de verdad abajo. Las cuentas sin CS las cubre el vendedor, por eso puede aparecer en las dos tablas.</p>
+    <p class="muted" style="margin-top:6px;font-size:11.5px">Crecimiento = NRR proyectado vs revenue de ${(prev||q).label}. NRR proyectado = base + ventas existentes que cargó esta persona + extensiones − bajas (cada uno mide solo lo que él mismo proyecta, para que el TOTAL no duplique cuentas compartidas). "Extensiones" muestra lo proyectado arriba y lo que ya factura de verdad abajo. Las cuentas sin CS las cubre el vendedor, por eso puede aparecer en las dos tablas. Lo que carga la otra persona de tu dupla en una cuenta compartida se ve aparte, en "Compartidas con tu dupla" dentro de cada pestaña.</p>
 `;
   // cuentas y duplas (solo con revenue de la plataforma, que trae vendedor y CS por cuenta)
   if(Object.keys(DUPLA).length){
