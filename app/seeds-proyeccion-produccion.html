@@ -240,6 +240,7 @@ let CURRENT_USER=null, SB=null;
 const STATE={}; // per-comercial {ext:{key:{prob}}, unchecked:Set, newLines:[]}
 let ACTIVE='__cons__';
 let ACCT_FILTER=''; // filtro de cuenta dentro de la pestaña de una persona (extensiones/bajas/activos)
+let CONS_FILTER={gran:'quarter',account:'',vendedor:'',cs:''}; // filtros de los gráficos del Consolidado
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
 const OWNERS={
@@ -1107,19 +1108,82 @@ function recalc(){
     np.innerHTML=`NRR proyectado: <b style="color:#fff">${pp}%</b> del Q anterior${metaN?` &nbsp;·&nbsp; meta ${mp}% (${fmt(metaN)})`:''}`;}
 }
 
-// ===== GRÁFICO: Revenue real por trimestre =====
-// Directo de la serie sincronizada (CONTRACTS), sin filtrar por cartera de nadie: es el revenue
-// real de toda la empresa, trimestre a trimestre, desglosado por stream (Seeder/Contractor —
-// hoy no tenemos más desglose que ctype sincronizado desde la plataforma).
-function revenueByQuarter(){
-  return QUARTERS.map(q=>{
-    let seeder=0,contractor=0;
-    CONTRACTS.forEach(c=>{
-      const v=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);
-      if(c.ctype==='CONTRACTOR')contractor+=v;else seeder+=v;
-    });
-    return{label:q.label,seeder,contractor,total:seeder+contractor};
+// ===== GRÁFICOS DEL CONSOLIDADO =====
+// Dos gráficos independientes: revenue real (por período, directo de la serie sincronizada) y
+// nuevas ventas proyectadas (TCV, lo que cada comercial tipeó en "Nuevos a vender" para el Q que
+// se está proyectando). Comparten los mismos filtros (cuenta / comercial / CS) via CONS_FILTER.
+function periodBuckets(gran){
+  if(gran==='year'){
+    const byY={};
+    MONTHS.forEach((m,i)=>{const y=m.key.slice(0,4);(byY[y]=byY[y]||{label:y,idx:[]}).idx.push(i);});
+    return Object.values(byY);
+  }
+  if(gran==='month')return MONTHS.map((m,i)=>({label:monthLabel(m.key),idx:[i]}));
+  return QUARTERS.map(q=>({label:q.label,idx:q.idx})); // trimestre (default)
+}
+function monthLabel(key){const[y,mm]=key.split('-').map(Number);return (MES_ABBR[mm-1]||mm)+' '+y;}
+function consAccounts(){return [...new Set(CONTRACTS.map(c=>c.client))].sort();}
+// cuenta / comercial (vendedor) / CS — los 3 filtros que comparten ambos gráficos
+function consFilteredContracts(){
+  return CONTRACTS.filter(c=>{
+    if(CONS_FILTER.account&&c.client!==CONS_FILTER.account)return false;
+    if(CONS_FILTER.vendedor&&ownerOf(c.client)!==CONS_FILTER.vendedor)return false;
+    if(CONS_FILTER.cs&&retOwnerOf(c.client)!==CONS_FILTER.cs)return false;
+    return true;
   });
+}
+function revenueSeries(list,buckets){
+  return buckets.map(b=>{
+    let seeder=0,contractor=0;
+    list.forEach(c=>{const v=b.idx.reduce((a,i)=>a+(c.series[i]||0),0);if(c.ctype==='CONTRACTOR')contractor+=v;else seeder+=v;});
+    return{label:b.label,seeder,contractor};
+  });
+}
+// detalle por cuenta: quién compone el total del período completo que muestra el gráfico de arriba
+function accountBreakdown(list,buckets){
+  const allIdx=[...new Set(buckets.flatMap(b=>b.idx))];
+  const by={};
+  list.forEach(c=>{const v=allIdx.reduce((a,i)=>a+(c.series[i]||0),0);if(!v)return;
+    const e=by[c.client]||(by[c.client]={client:c.client,revenue:0,n:0});e.revenue+=v;e.n++;});
+  return Object.values(by).sort((a,b)=>b.revenue-a.revenue);
+}
+// nuevas ventas proyectadas (TCV) por comercial — las líneas de "Nuevos a vender" no tienen período
+// propio (son siempre relativas al Q que se está proyectando en el selector de arriba), por eso este
+// gráfico no tiene selector de período como el de revenue, solo cuenta/comercial/CS.
+function newSalesByComercial(){
+  const order=[...people(),'Sin asignar'];const rows=[];
+  order.forEach(o=>{
+    if(CONS_FILTER.vendedor&&o!==CONS_FILTER.vendedor)return;
+    const st=getState(o);let existTCV=0,logoTCV=0;const lines=[];
+    (st.newLines||[]).forEach(l=>{
+      const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0;if(!qn||!tk)return;
+      const tcv=qn*tk*du;
+      if(l.isNew){
+        if(CONS_FILTER.account||CONS_FILTER.cs)return; // logo nuevo: todavía no tiene cuenta ni CS asignado
+        logoTCV+=tcv;lines.push({o,cuenta:l.newName||'(logo nuevo)',tipo:'Logo nuevo',tcv});
+      }else{
+        if(CONS_FILTER.account&&l.account!==CONS_FILTER.account)return;
+        if(CONS_FILTER.cs&&retOwnerOf(l.account)!==CONS_FILTER.cs)return;
+        existTCV+=tcv;lines.push({o,cuenta:l.account||'(sin cuenta)',tipo:'Existente',tcv});
+      }
+    });
+    if(existTCV+logoTCV>0)rows.push({o,label:o.replace(' (Mono)',''),existTCV,logoTCV,lines});
+  });
+  return rows.sort((a,b)=>(b.existTCV+b.logoTCV)-(a.existTCV+a.logoTCV));
+}
+function consFilterBar(){
+  const accts=consAccounts(),vends=people();
+  const css=[...new Set(Object.values(DUPLA).map(d=>d.cs).filter(Boolean))].sort();
+  const opt=(v,t,cur)=>`<option value="${v}" ${cur===v?'selected':''}>${t}</option>`;
+  const field=(id,label,inner)=>`<div style="display:flex;flex-direction:column;gap:4px">
+    <label class="fld" style="margin:0;font-size:10px">${label}</label>
+    <select id="${id}" style="min-width:140px">${inner}</select></div>`;
+  return `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin:14px 0">
+    ${field('cf-gran','Período',[opt('quarter','Trimestre',CONS_FILTER.gran),opt('month','Mes',CONS_FILTER.gran),opt('year','Año',CONS_FILTER.gran)].join(''))}
+    ${field('cf-acct','Cuenta',opt('','Todas',CONS_FILTER.account)+accts.map(a=>opt(a,a,CONS_FILTER.account)).join(''))}
+    ${field('cf-vend','Comercial',opt('','Todos',CONS_FILTER.vendedor)+vends.map(v=>opt(v,v.replace(' (Mono)',''),CONS_FILTER.vendedor)).join(''))}
+    ${field('cf-cs','CS',opt('','Todos',CONS_FILTER.cs)+css.map(v=>opt(v,v.replace(' (Mono)',''),CONS_FILTER.cs)).join(''))}
+  </div>`;
 }
 function niceMax(v){
   if(v<=0)return 100;
@@ -1127,13 +1191,15 @@ function niceMax(v){
   const step=n<=1?1:n<=2?2:n<=5?5:10;
   return step*mag;
 }
-function revenueChartSVG(data){
-  if(!data.length||!data.some(d=>d.total>0))return '<div class="empty">Todavía no hay revenue sincronizado.</div>';
+// gráfico de barras apiladas genérico (2 series) — lo usan tanto el de revenue como el de nuevas ventas
+function stackedBarSVG(data,kBottom,kTop,colorBottom,colorTop,labelBottom,labelTop,emptyMsg){
+  if(!data.length||!data.some(d=>(d[kBottom]||0)+(d[kTop]||0)>0))return `<div class="empty">${emptyMsg}</div>`;
   const W=Math.max(560,data.length*104+72),H=300;
   const padL=58,padR=14,padT=20,padB=38;
   const plotW=W-padL-padR,plotH=H-padT-padB;
-  const maxV=niceMax(Math.max(...data.map(d=>d.total))*1.12);
-  const gap=plotW/data.length,barW=Math.min(60,gap*0.56);
+  const totals=data.map(d=>(d[kBottom]||0)+(d[kTop]||0));
+  const maxV=niceMax(Math.max(...totals)*1.12);
+  const gap=plotW/data.length,barW=Math.min(64,gap*0.56);
   const y=v=>padT+plotH-(v/maxV)*plotH;
   let grid='';
   for(let i=0;i<=4;i++){const v=maxV/4*i,yy=y(v);
@@ -1141,13 +1207,14 @@ function revenueChartSVG(data){
       <text x="${padL-8}" y="${(yy+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#9A9A96">${fmt(v)}</text>`;}
   let bars='';
   data.forEach((d,i)=>{
+    const vB=d[kBottom]||0,vT=d[kTop]||0,tot=vB+vT;
     const cx=padL+gap*i+gap/2,x=cx-barW/2;
-    const hS=(d.seeder/maxV)*plotH,hC=(d.contractor/maxV)*plotH;
-    const yS=padT+plotH-hS,yC=yS-hC;
+    const hB=(vB/maxV)*plotH,hT=(vT/maxV)*plotH;
+    const yB=padT+plotH-hB,yT=yB-hT;
     bars+=`<g>
-      ${d.contractor>0?`<rect x="${x.toFixed(1)}" y="${yC.toFixed(1)}" width="${barW.toFixed(1)}" height="${hC.toFixed(1)}" rx="3" fill="var(--purple)"><title>${d.label} · Contractor: ${fmt(d.contractor)}</title></rect>`:''}
-      ${d.seeder>0?`<rect x="${x.toFixed(1)}" y="${yS.toFixed(1)}" width="${barW.toFixed(1)}" height="${hS.toFixed(1)}" rx="3" fill="var(--blue)"><title>${d.label} · Seeder: ${fmt(d.seeder)}</title></rect>`:''}
-      <text x="${cx.toFixed(1)}" y="${(yC-8).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">${fmt(d.total)}</text>
+      ${vT>0?`<rect x="${x.toFixed(1)}" y="${yT.toFixed(1)}" width="${barW.toFixed(1)}" height="${hT.toFixed(1)}" rx="3" fill="${colorTop}"><title>${d.label} · ${labelTop}: ${fmt(vT)}</title></rect>`:''}
+      ${vB>0?`<rect x="${x.toFixed(1)}" y="${yB.toFixed(1)}" width="${barW.toFixed(1)}" height="${hB.toFixed(1)}" rx="3" fill="${colorBottom}"><title>${d.label} · ${labelBottom}: ${fmt(vB)}</title></rect>`:''}
+      <text x="${cx.toFixed(1)}" y="${(yT-8).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">${fmt(tot)}</text>
       <text x="${cx.toFixed(1)}" y="${(H-padB+20).toFixed(1)}" text-anchor="middle" font-size="11" fill="#6B6B68">${d.label}</text>
     </g>`;
   });
@@ -1188,11 +1255,32 @@ function renderConsolidated(){
   let html=`<h2><span class="n">3</span>Consolidado · ${q.label}</h2>
     <p class="sub">${act.size} cuentas activas · ${salesRows.length} en ventas y ${csRows.length} en Customer Success. Meta de retención +${g}%.</p>
     <div class="section-note">Resumen de todos (solo lectura). <b>Para proyectar, entrá a la pestaña de cada persona</b>. Lo que cada uno carga se suma acá solo.</div>
-    <div class="row-actions" style="margin-top:12px"><button class="btn primary" id="cons-exp">⬇ Exportar Excel (Consolidado + 1 pestaña por comercial)</button></div>
-    <label class="fld" style="margin:20px 0 10px">Revenue real por trimestre</label>
-    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Contractor</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches, revenue real de toda la empresa (no depende de cartera ni de quién la proyecta).</div>
-    <div class="card" style="padding:16px 18px;margin-top:0">${revenueChartSVG(revenueByQuarter())}</div>
-    <div class="kpis" style="margin-top:14px">
+    <div class="row-actions" style="margin-top:12px"><button class="btn primary" id="cons-exp">⬇ Exportar Excel (Consolidado + 1 pestaña por comercial)</button></div>`;
+  // ---- Gráficos: revenue real (por período) y nuevas ventas proyectadas (TCV) — ambos con los
+  // mismos filtros de cuenta / comercial / CS, para poder ver el detalle de una cuenta o persona puntual.
+  const buckets=periodBuckets(CONS_FILTER.gran);
+  const filteredList=consFilteredContracts();
+  const revData=revenueSeries(filteredList,buckets);
+  const acctRows=accountBreakdown(filteredList,buckets);
+  const salesData=newSalesByComercial();
+  const granLabel=CONS_FILTER.gran==='month'?'mes':CONS_FILTER.gran==='year'?'año':'trimestre';
+  html+=`<label class="fld" style="margin:20px 0 4px">Gráficos</label>
+    ${consFilterBar()}
+    <label class="fld" style="margin:4px 0 6px;font-size:12px">Revenue real por ${granLabel}</label>
+    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Contractor</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches — revenue real, no depende de cartera ni de quién lo proyecta.</div>
+    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(revData,'seeder','contractor','var(--blue)','var(--purple)','Seeder','Contractor','Todavía no hay revenue sincronizado para este filtro.')}</div>
+    ${acctRows.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${acctRows.length} cuenta${acctRows.length===1?'':'s'} · revenue del período completo que muestra el gráfico</span></summary>
+      <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Revenue</th></tr></thead><tbody>
+        ${acctRows.map(r=>`<tr><td><b>${r.client}</b></td><td class="num">${r.n}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
+      </tbody></table></details>`:''}
+    <label class="fld" style="margin:22px 0 6px;font-size:12px">Nuevas ventas proyectadas (TCV) · ${q.label}</label>
+    <div class="section-note" style="margin-bottom:10px"><span class="pill" style="background:#D7F5E9;color:var(--green)">Existentes</span> &nbsp;<span class="pill end-soon">Logos nuevos</span> &nbsp;·&nbsp; lo que cada comercial tipeó en "Nuevos a vender" — es relativo al Q que se está proyectando arriba, por eso no tiene filtro de período.</div>
+    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesData,'existTCV','logoTCV','var(--green)','var(--amber)','Existentes','Logos nuevos','Todavía no hay nuevas ventas proyectadas para este filtro.')}</div>
+    ${salesData.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por línea</span><span class="lg-meta">${salesData.reduce((a,d)=>a+d.lines.length,0)} línea${salesData.reduce((a,d)=>a+d.lines.length,0)===1?'':'s'}</span></summary>
+      <table class="lg-roles"><thead><tr><th>Comercial</th><th>Cuenta</th><th>Tipo</th><th class="num">TCV</th></tr></thead><tbody>
+        ${salesData.flatMap(d=>d.lines).sort((a,b)=>b.tcv-a.tcv).map(l=>`<tr><td>${nm(l.o)}</td><td><b>${l.cuenta}</b></td><td>${l.tipo}</td><td class="num">${fmt(l.tcv)}</td></tr>`).join('')}
+      </tbody></table></details>`:''}
+    <div class="kpis" style="margin-top:20px">
       ${kpi('Nuevas ventas · existentes',fmt(tExist),'TCV proyectado','up')}
       ${kpi('Nuevas ventas · logos',fmt(tLogo),allLogos.length+' logos nuevos','up')}
       ${kpi('Extensiones',fmt(tExt),'esperado ponderado','flat')}
@@ -1334,6 +1422,10 @@ function renderConsolidated(){
   const cb=$('#cons-bars');if(cb)cb.innerHTML=arr.map(([n,v])=>`<div class="bar-row"><div class="nm" title="${n}">${n}</div><div class="track"><div class="fill" style="width:${v/mx*100}%"></div></div><div class="val">${fmt(v)}</div></div>`).join('');
   const ce=$('#cons-exp');if(ce)ce.onclick=exportExcel;
   const bd=$('#brief-dl');if(bd)bd.onclick=exportBriefTA;
+  const cfg=$('#cf-gran');if(cfg)cfg.onchange=e=>{CONS_FILTER.gran=e.target.value;render();};
+  const cfa=$('#cf-acct');if(cfa)cfa.onchange=e=>{CONS_FILTER.account=e.target.value;render();};
+  const cfv=$('#cf-vend');if(cfv)cfv.onchange=e=>{CONS_FILTER.vendedor=e.target.value;render();};
+  const cfc=$('#cf-cs');if(cfc)cfc.onchange=e=>{CONS_FILTER.cs=e.target.value;render();};
   $$('#panel .score-card').forEach(card=>card.onclick=()=>{ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
 }
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
