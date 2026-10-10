@@ -69,7 +69,7 @@ td{padding:9px;border-bottom:1px solid #eee;vertical-align:middle}
 tr:last-child td{border-bottom:none}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .pill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block}
-.pill.seeder{background:#E3F0FF;color:var(--blue)}.pill.contractor{background:#F0E8FF;color:var(--purple)}
+.pill.seeder{background:#D7F5E9;color:var(--green)}.pill.contractor{background:#F0E8FF;color:var(--purple)}
 .pill.end-now{background:#FBE3E4;color:var(--red)}.pill.end-soon{background:#FBF1DA;color:#A8780C}
 .chk{width:17px;height:17px;accent-color:var(--green);cursor:pointer}
 input.prob{width:58px;padding:5px 7px;font-size:12px;text-align:right}
@@ -1267,8 +1267,8 @@ function renderConsolidated(){
   html+=`<label class="fld" style="margin:20px 0 4px">Gráficos</label>
     ${consFilterBar()}
     <label class="fld" style="margin:4px 0 6px;font-size:12px">Revenue real por ${granLabel}</label>
-    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Contractor</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches — revenue real, no depende de cartera ni de quién lo proyecta.</div>
-    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(revData,'seeder','contractor','var(--blue)','var(--purple)','Seeder','Contractor','Todavía no hay revenue sincronizado para este filtro.')}</div>
+    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Hire</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches — revenue real, no depende de cartera ni de quién lo proyecta.</div>
+    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(revData,'seeder','contractor','var(--green)','var(--purple)','Seeder','Hire','Todavía no hay revenue sincronizado para este filtro.')}</div>
     ${acctRows.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${acctRows.length} cuenta${acctRows.length===1?'':'s'} · revenue del período completo que muestra el gráfico</span></summary>
       <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Revenue</th></tr></thead><tbody>
         ${acctRows.map(r=>`<tr><td><b>${r.client}</b></td><td class="num">${r.n}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
