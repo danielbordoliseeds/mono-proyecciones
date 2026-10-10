@@ -1150,26 +1150,35 @@ function accountBreakdown(list,buckets){
 // nuevas ventas proyectadas (TCV) por comercial — las líneas de "Nuevos a vender" no tienen período
 // propio (son siempre relativas al Q que se está proyectando en el selector de arriba), por eso este
 // gráfico no tiene selector de período como el de revenue, solo cuenta/comercial/CS.
-function newSalesByComercial(){
-  const order=[...people(),'Sin asignar'];const rows=[];
-  order.forEach(o=>{
-    if(CONS_FILTER.vendedor&&o!==CONS_FILTER.vendedor)return;
-    const st=getState(o);let existTCV=0,logoTCV=0;const lines=[];
-    (st.newLines||[]).forEach(l=>{
-      const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0;if(!qn||!tk)return;
-      const tcv=qn*tk*du;
-      if(l.isNew){
-        if(CONS_FILTER.account||CONS_FILTER.cs)return; // logo nuevo: todavía no tiene cuenta ni CS asignado
-        logoTCV+=tcv;lines.push({o,cuenta:l.newName||'(logo nuevo)',tipo:'Logo nuevo',tcv});
-      }else{
-        if(CONS_FILTER.account&&l.account!==CONS_FILTER.account)return;
-        if(CONS_FILTER.cs&&retOwnerOf(l.account)!==CONS_FILTER.cs)return;
-        existTCV+=tcv;lines.push({o,cuenta:l.account||'(sin cuenta)',tipo:'Existente',tcv});
-      }
+// nuevas ventas REALES (no proyectadas): mismo criterio que realSales(), pero aplicado período a período —
+// un contrato cuenta en el período donde arrancó a facturar de verdad, separado en existente/logo nuevo
+// según si esa cuenta ya facturaba algo antes. Usa los mismos buckets y la misma lista filtrada que el
+// gráfico de revenue, así que comparten período/cuenta/comercial/CS sin ninguna lógica extra.
+// fi===0 (factura desde el primer mes que tenemos sincronizado) no cuenta como venta nueva: no hay
+// data de antes para saber si esa cuenta ya facturaba hace rato, así que se trata como base, no como
+// nueva venta del período (si no, el primer mes cargado siempre aparecería como "puro logo nuevo").
+function newSalesSeries(list,buckets){
+  return buckets.map(b=>{
+    let existQ=0,logoQ=0;
+    list.filter(c=>{const fi=firstIdx(c);return fi>0&&b.idx.includes(fi);}).forEach(c=>{
+      const fi=firstIdx(c);
+      const real=b.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);
+      if(clientHadRevenueBefore(c.client,fi))existQ+=real;else logoQ+=real;
     });
-    if(existTCV+logoTCV>0)rows.push({o,label:o.replace(' (Mono)',''),existTCV,logoTCV,lines});
+    return{label:b.label,existQ,logoQ};
   });
-  return rows.sort((a,b)=>(b.existTCV+b.logoTCV)-(a.existTCV+a.logoTCV));
+}
+// detalle: qué cuentas arrancaron a facturar (de verdad) dentro del período completo que muestra el gráfico
+function newSalesBreakdown(list,buckets){
+  const allIdx=[...new Set(buckets.flatMap(b=>b.idx))];
+  const rows=[];
+  list.forEach(c=>{
+    const fi=firstIdx(c);if(fi<=0||!allIdx.includes(fi))return;
+    const real=allIdx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);if(!real)return;
+    rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
+      tipo:clientHadRevenueBefore(c.client,fi)?'Existente':'Logo nuevo',revenue:real});
+  });
+  return rows.sort((a,b)=>b.revenue-a.revenue);
 }
 function consFilterBar(){
   const accts=consAccounts(),vends=people();
@@ -1256,13 +1265,15 @@ function renderConsolidated(){
     <p class="sub">${act.size} cuentas activas · ${salesRows.length} en ventas y ${csRows.length} en Customer Success. Meta de retención +${g}%.</p>
     <div class="section-note">Resumen de todos (solo lectura). <b>Para proyectar, entrá a la pestaña de cada persona</b>. Lo que cada uno carga se suma acá solo.</div>
     <div class="row-actions" style="margin-top:12px"><button class="btn primary" id="cons-exp">⬇ Exportar Excel (Consolidado + 1 pestaña por comercial)</button></div>`;
-  // ---- Gráficos: revenue real (por período) y nuevas ventas proyectadas (TCV) — ambos con los
-  // mismos filtros de cuenta / comercial / CS, para poder ver el detalle de una cuenta o persona puntual.
+  // ---- Gráficos: revenue real y nuevas ventas reales, los dos por período — comparten los mismos
+  // filtros de cuenta / comercial / CS y el mismo período, para poder ver el detalle de una cuenta o
+  // persona puntual en cualquiera de los dos.
   const buckets=periodBuckets(CONS_FILTER.gran);
   const filteredList=consFilteredContracts();
   const revData=revenueSeries(filteredList,buckets);
   const acctRows=accountBreakdown(filteredList,buckets);
-  const salesData=newSalesByComercial();
+  const salesData=newSalesSeries(filteredList,buckets);
+  const salesRowsDet=newSalesBreakdown(filteredList,buckets);
   const granLabel=CONS_FILTER.gran==='month'?'mes':CONS_FILTER.gran==='year'?'año':'trimestre';
   html+=`<label class="fld" style="margin:20px 0 4px">Gráficos</label>
     ${consFilterBar()}
@@ -1273,12 +1284,12 @@ function renderConsolidated(){
       <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Revenue</th></tr></thead><tbody>
         ${acctRows.map(r=>`<tr><td><b>${r.client}</b></td><td class="num">${r.n}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
       </tbody></table></details>`:''}
-    <label class="fld" style="margin:22px 0 6px;font-size:12px">Nuevas ventas proyectadas (TCV) · ${q.label}</label>
-    <div class="section-note" style="margin-bottom:10px"><span class="pill" style="background:#D7F5E9;color:var(--green)">Existentes</span> &nbsp;<span class="pill end-soon">Logos nuevos</span> &nbsp;·&nbsp; lo que cada comercial tipeó en "Nuevos a vender" — es relativo al Q que se está proyectando arriba, por eso no tiene filtro de período.</div>
-    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesData,'existTCV','logoTCV','var(--green)','var(--amber)','Existentes','Logos nuevos','Todavía no hay nuevas ventas proyectadas para este filtro.')}</div>
-    ${salesData.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por línea</span><span class="lg-meta">${salesData.reduce((a,d)=>a+d.lines.length,0)} línea${salesData.reduce((a,d)=>a+d.lines.length,0)===1?'':'s'}</span></summary>
-      <table class="lg-roles"><thead><tr><th>Comercial</th><th>Cuenta</th><th>Tipo</th><th class="num">TCV</th></tr></thead><tbody>
-        ${salesData.flatMap(d=>d.lines).sort((a,b)=>b.tcv-a.tcv).map(l=>`<tr><td>${nm(l.o)}</td><td><b>${l.cuenta}</b></td><td>${l.tipo}</td><td class="num">${fmt(l.tcv)}</td></tr>`).join('')}
+    <label class="fld" style="margin:22px 0 6px;font-size:12px">Nuevas ventas reales por ${granLabel}</label>
+    <div class="section-note" style="margin-bottom:10px"><span class="pill" style="background:#D7F5E9;color:var(--green)">Existentes</span> &nbsp;<span class="pill end-soon">Logos nuevos</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches — revenue real de contratos que arrancaron a facturar en ese período (no lo que se tipeó como proyección).</div>
+    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesData,'existQ','logoQ','var(--green)','var(--amber)','Existentes','Logos nuevos','Todavía no hay nuevas ventas reales para este filtro.')}</div>
+    ${salesRowsDet.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${salesRowsDet.length} cuenta${salesRowsDet.length===1?'':'s'} · revenue del período completo que muestra el gráfico</span></summary>
+      <table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Tipo</th><th class="num">Revenue</th></tr></thead><tbody>
+        ${salesRowsDet.map(r=>`<tr><td><b>${r.client}</b></td><td>${r.vendedor}</td><td>${r.tipo}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
       </tbody></table></details>`:''}
     <div class="kpis" style="margin-top:20px">
       ${kpi('Nuevas ventas · existentes',fmt(tExist),'TCV proyectado','up')}
