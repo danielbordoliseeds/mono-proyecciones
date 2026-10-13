@@ -225,6 +225,7 @@ details.howto b{color:var(--ink)}
   </div>
 
   <!-- 3. PANEL COMERCIAL -->
+  <div class="tabs hidden" id="section-nav" style="margin-bottom:14px"></div>
   <div class="card hidden" id="panel"></div>
 
   <p class="foot">Seeds · Motor de Proyección v2 — owners cruzados con HubSpot al 25/06/2026. Mapeo editable en el bloque OWNERS del código.</p>
@@ -241,6 +242,8 @@ const STATE={}; // per-comercial {ext:{key:{prob}}, unchecked:Set, newLines:[]}
 let ACTIVE='__cons__';
 let ACCT_FILTER=''; // filtro de cuenta dentro de la pestaña de una persona (extensiones/bajas/activos)
 let CONS_FILTER={gran:'quarter',account:'',vendedor:'',cs:''}; // filtros de los gráficos del Consolidado
+let PERSON_SECTION='home'; // 'home' | 'cuentas' | 'q' | 'semanal' — qué ve un comercial/CS de sí mismo
+let MISCUENTAS_ACCT=''; // cuenta elegida dentro de "Mis cuentas" ('' = Resumen)
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
 const OWNERS={
@@ -569,7 +572,118 @@ function churnLost(o){
 function render(){
   if(!CONTRACTS.length)return;
   buildTabs();
-  if(ACTIVE==='__cons__')renderConsolidated();else renderComercial(ACTIVE);
+  const sn=$('#section-nav');
+  if(ACTIVE==='__cons__'){
+    if(sn)sn.classList.add('hidden');
+    renderConsolidated();
+    return;
+  }
+  if(sn){
+    sn.classList.remove('hidden');
+    const sec=(s,label)=>`<div class="tab${PERSON_SECTION===s?' active':''}" data-sec="${s}">${label}</div>`;
+    sn.innerHTML=sec('home','🏠 Inicio')+sec('cuentas','📒 Mis cuentas')+sec('q','🗓️ Proyección del Q')
+      +`<div class="tab" data-sec="semanal" title="Próximamente" style="opacity:.45;cursor:default">📅 Proyección semanal</div>`;
+    $$('#section-nav .tab[data-sec]').forEach(t=>t.onclick=()=>{
+      const s=t.dataset.sec;if(s==='semanal')return;PERSON_SECTION=s;render();});
+  }
+  if(PERSON_SECTION==='cuentas')renderMisCuentas(ACTIVE);
+  else if(PERSON_SECTION==='q')renderComercial(ACTIVE);
+  else renderHome(ACTIVE);
+}
+// cálculos base que comparten Inicio y Mis cuentas: cartera combinada (retención + venta) de la persona
+function personSummary(o){
+  const act=activeAccounts();const list=contractsFor(o,act);const salesList=salesContractsFor(o,act);
+  const q=projQ(),prev=baseQ();
+  const seen=new Set();const viewList=[...list,...salesList].filter(c=>{const k=ckey(c);if(seen.has(k))return false;seen.add(k);return true;});
+  const base=sumQ(viewList,q),curRev=sumQ(viewList,prev||q);
+  const rs=realSales(viewList,q);const rx=realExtensions(viewList,q,prev);
+  const accts=[...acctsOf(o,act)].sort();
+  return{act,list,salesList,viewList,q,prev,base,curRev,rs,rx,accts};
+}
+// pantalla principal de cada persona: solo lo real, sin nada para cargar (eso vive en "Proyección del Q")
+function renderHome(o){
+  const{viewList,q,rs,rx,base}=personSummary(o);
+  const closed=isQuarterClosed(q);
+  const html=`<h2><span class="n">3</span>${o} · ${q.label}</h2>
+    <p class="sub">Lo real, tal como lo ve la plataforma. Para cargar tu proyección andá a "Proyección del Q"; para el detalle por cuenta, a "Mis cuentas".</p>
+    <div class="kpis" style="margin-top:14px">
+      ${kpi('Net revenue real '+q.label,fmt(base),closed?'resultado final':'a la fecha, va completándose','flat')}
+      ${kpi('Ventas realizadas',fmt(rs.total),'existentes + logos, ya facturando','up')}
+      ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
+      ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}
+    </div>`;
+  $('#panel').innerHTML=html;
+}
+// "Mis cuentas": book de cuentas de la persona (cartera combinada) — Resumen + una pestaña por cuenta,
+// con revenue y nuevas ventas reales por trimestre (mismos helpers que los gráficos del Consolidado) y
+// el objetivo/cumplimiento del Q en curso.
+function renderMisCuentas(o){
+  const{viewList,q,prev,base,rs,accts}=personSummary(o);
+  if(MISCUENTAS_ACCT&&!accts.includes(MISCUENTAS_ACCT))MISCUENTAS_ACCT='';
+  const buckets=periodBuckets('quarter');
+  const yr=QUARTERS.length?QUARTERS[QUARTERS.length-1].y:'';
+  const ob=OBJECTIVES[o]||{};
+  const tabsHtml=`<div class="tabs" style="margin-bottom:14px;flex-wrap:wrap">
+    <div class="tab${!MISCUENTAS_ACCT?' active':''}" data-acct="">Resumen</div>
+    ${accts.map(a=>`<div class="tab${MISCUENTAS_ACCT===a?' active':''}" data-acct="${a}">${a}</div>`).join('')}
+  </div>`;
+  let body;
+  if(!MISCUENTAS_ACCT){
+    const yearRevSeries=revenueSeries(viewList,buckets);
+    const yearSalesSeries=newSalesSeries(viewList,buckets);
+    const yearRevenue=yearRevSeries.reduce((a,d)=>a+d.seeder+d.contractor,0);
+    const yearExist=yearSalesSeries.reduce((a,d)=>a+d.existQ,0),yearLogo=yearSalesSeries.reduce((a,d)=>a+d.logoQ,0);
+    const refIdx=(prev||q).idx[2];
+    const byAcct=accts.map(a=>{
+      const cs=viewList.filter(c=>c.client===a);
+      const revYear=buckets.reduce((s,b)=>s+b.idx.reduce((s2,i)=>s2+cs.reduce((s3,c)=>s3+(c.series[i]||0),0),0),0);
+      const revMes=cs.reduce((s,c)=>s+(c.series[refIdx]||0),0);
+      const salesYear=newSalesSeries(cs,buckets).reduce((s,d)=>s+d.existQ+d.logoQ,0);
+      return{a,n:cs.length,revYear,revMes,salesYear};
+    }).sort((x,y)=>y.revMes-x.revMes);
+    const totalMes=byAcct.reduce((s,x)=>s+x.revMes,0);
+    const top=byAcct[0];
+    const parts=[];
+    if(ob.existing)parts.push(completionPct(rs.existQ,ob.existing));
+    if(ob.logos)parts.push(completionPct(rs.logoQ,ob.logos));
+    if(ob.nrr)parts.push(completionPct(base,ob.nrr));
+    const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
+    body=`<div class="kpis" style="margin-top:0">
+        ${kpi('Ventas nuevas · existentes '+yr,fmt(yearExist),'clientes con relación previa','up')}
+        ${kpi('Ventas nuevas · logos '+yr,fmt(yearLogo),'cuentas nuevas','up')}
+        ${kpi('Net revenue total '+yr,fmt(yearRevenue),'todo: nuevos, extensiones y vigentes','flat')}
+      </div>
+      ${top&&totalMes?`<div class="section-note" style="margin-top:14px">${top.a} concentra <b style="color:var(--green)">${Math.round(top.revMes/totalMes*100)}%</b> de tu net revenue mensual.</div>`:''}
+      <label class="fld" style="margin:20px 0 10px">Tus cuentas</label>
+      <div style="overflow-x:auto"><table><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Net revenue ${yr}</th><th class="num">Net revenue/mes</th><th class="num">% cartera</th><th class="num">Nuevas ventas ${yr}</th></tr></thead><tbody>
+        ${byAcct.map(x=>`<tr class="acct-row" data-acct="${x.a}" style="cursor:pointer"><td><b>${x.a}</b></td><td class="num">${x.n}</td><td class="num">${fmt(x.revYear)}</td><td class="num">${fmt(x.revMes)}</td><td class="num">${totalMes?Math.round(x.revMes/totalMes*100):0}%</td><td class="num">${fmt(x.salesYear)}</td></tr>`).join('')}
+      </tbody></table></div>
+      ${parts.length?`<label class="fld" style="margin:22px 0 10px">Objetivos y cumplimiento · ${q.label}</label>
+        <div class="card" style="padding:16px 18px;margin-top:0">
+          <div style="font-size:30px;font-weight:800;color:${completionColor(overall)};margin-bottom:10px">${overall}%</div>
+          ${ob.existing?meterRow('N. ventas existentes',rs.existQ,ob.existing):''}
+          ${ob.logos?meterRow('N. ventas logos',rs.logoQ,ob.logos):''}
+          ${ob.nrr?meterRow('NRR · revenue Q',base,ob.nrr):''}
+        </div>`:''}`;
+  }else{
+    const cs=viewList.filter(c=>c.client===MISCUENTAS_ACCT);
+    const revByQ=revenueSeries(cs,buckets),salesByQ=newSalesSeries(cs,buckets);
+    const yearRev=revByQ.reduce((a,d)=>a+d.seeder+d.contractor,0),yearSales=salesByQ.reduce((a,d)=>a+d.existQ+d.logoQ,0);
+    const refIdx=(prev||q).idx[2];
+    const mesRev=cs.reduce((s,c)=>s+(c.series[refIdx]||0),0),nContr=cs.filter(c=>c.series[refIdx]>0).length;
+    body=`<div class="kpis" style="margin-top:0">
+        ${kpi('Net revenue '+yr,fmt(yearRev),`hoy factura ${fmt(mesRev)}/mes con ${nContr} contrato${nContr===1?'':'s'}`,'flat')}
+        ${kpi('Nuevas ventas '+yr,fmt(yearSales),'existentes + logos, ya facturando','up')}
+      </div>
+      <label class="fld" style="margin:20px 0 10px">Net revenue por trimestre</label>
+      <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(revByQ,'seeder','contractor','var(--green)','var(--purple)','Seeder','Hire','Sin revenue para esta cuenta.')}</div>
+      <label class="fld" style="margin:22px 0 10px">Nuevas ventas por trimestre</label>
+      <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesByQ,'existQ','logoQ','var(--green)','var(--amber)','Existentes','Logos nuevos','Sin nuevas ventas para esta cuenta.')}</div>`;
+  }
+  $('#panel').innerHTML=`<h2><span class="n">3</span>Mis cuentas · ${o}</h2>
+    <p class="sub">El book completo de tus cuentas (vendedor + CS combinado), lo real de la plataforma.</p>
+    ${tabsHtml}${body}`;
+  $$('#panel .tab[data-acct], #panel .acct-row[data-acct]').forEach(el=>el.onclick=()=>{MISCUENTAS_ACCT=el.dataset.acct;render();});
 }
 
 function renderComercial(o){
