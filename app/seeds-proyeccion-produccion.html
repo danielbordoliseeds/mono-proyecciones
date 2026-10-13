@@ -424,13 +424,20 @@ function isFrozen(q){return !!(q&&DEADLINES[q.id]&&new Date()>new Date(DEADLINES
 function clientHadRevenueBefore(client,beforeIdx){
   return CONTRACTS.some(c=>c.client===client&&c.series.slice(0,beforeIdx).some(v=>v>0));
 }
+// TCV real de un contrato: net revenue mensual × cantidad total de meses que factura (no solo los que
+// caen en un trimestre puntual) — así "cuánto vendimos" no se confunde con "cuánto de eso entra en este Q".
+function tcvOf(c){
+  const fi=firstIdx(c);if(fi<0)return 0;
+  const months=c.series.filter(v=>v>0).length;
+  return (c.series[fi]||0)*months;
+}
 function realSales(list,q){
-  let existQ=0,logoQ=0;
+  let existQ=0,logoQ=0,existTCV=0,logoTCV=0;
   list.filter(c=>q.idx.includes(firstIdx(c))).forEach(c=>{
-    const fi=firstIdx(c);const real=q.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);
-    if(clientHadRevenueBefore(c.client,fi))existQ+=real;else logoQ+=real;
+    const fi=firstIdx(c);const real=q.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);const tcv=tcvOf(c);
+    if(clientHadRevenueBefore(c.client,fi)){existQ+=real;existTCV+=tcv;}else{logoQ+=real;logoTCV+=tcv;}
   });
-  return{existQ,logoQ,total:existQ+logoQ};
+  return{existQ,logoQ,total:existQ+logoQ,existTCV,logoTCV,totalTCV:existTCV+logoTCV};
 }
 // de los contratos por vencer (endingCandidates): cuáles ya se extendieron de verdad (siguen facturando
 // en el Q, visible en la serie sincronizada), cuáles siguen sin resolver, y cuáles — si el Q ya cerró y
@@ -508,7 +515,7 @@ function refreshRevenueCard(){
   el.classList.remove('hidden');
   el.innerHTML=`
     ${kpi('Net revenue real '+q.label,fmt(sumQ(all,q)),closed?'resultado final':'a la fecha · se va completando solo','flat')}
-    ${kpi('Ventas realizadas',fmt(rs.total),'existentes + logos, ya facturando','up')}
+    ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'existentes + logos, ya facturando','up')}
     ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
     ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}`;
 }
@@ -622,7 +629,7 @@ function renderHome(o){
     <p class="sub">Lo real, tal como lo ve la plataforma. Para cargar tu proyección andá a "Proyección del Q"; para el detalle por cuenta, a "Mis cuentas".</p>
     <div class="kpis" style="margin-top:14px">
       ${kpi('Net revenue real '+q.label,fmt(base),closed?'resultado final':'a la fecha, va completándose','flat')}
-      ${kpi('Ventas realizadas',fmt(rs.total),'existentes + logos, ya facturando','up')}
+      ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'existentes + logos, ya facturando','up')}
       ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
       ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}
     </div>`;
@@ -646,20 +653,20 @@ function renderMisCuentas(o){
     const yearRevSeries=revenueSeries(viewList,buckets);
     const yearSalesSeries=newSalesSeries(viewList,buckets);
     const yearRevenue=yearRevSeries.reduce((a,d)=>a+d.seeder+d.contractor,0);
-    const yearExist=yearSalesSeries.reduce((a,d)=>a+d.existQ,0),yearLogo=yearSalesSeries.reduce((a,d)=>a+d.logoQ,0);
+    const yearExist=yearSalesSeries.reduce((a,d)=>a+d.existTCV,0),yearLogo=yearSalesSeries.reduce((a,d)=>a+d.logoTCV,0);
     const refIdx=(prev||q).idx[2];
     const byAcct=accts.map(a=>{
       const cs=viewList.filter(c=>c.client===a);
       const revYear=buckets.reduce((s,b)=>s+b.idx.reduce((s2,i)=>s2+cs.reduce((s3,c)=>s3+(c.series[i]||0),0),0),0);
       const revMes=cs.reduce((s,c)=>s+(c.series[refIdx]||0),0);
-      const salesYear=newSalesSeries(cs,buckets).reduce((s,d)=>s+d.existQ+d.logoQ,0);
+      const salesYear=newSalesSeries(cs,buckets).reduce((s,d)=>s+d.existTCV+d.logoTCV,0);
       return{a,n:cs.length,revYear,revMes,salesYear};
     }).sort((x,y)=>y.revMes-x.revMes);
     const totalMes=byAcct.reduce((s,x)=>s+x.revMes,0);
     const top=byAcct[0];
     const parts=[];
-    if(ob.existing)parts.push(completionPct(rs.existQ,ob.existing));
-    if(ob.logos)parts.push(completionPct(rs.logoQ,ob.logos));
+    if(ob.existing)parts.push(completionPct(rs.existTCV,ob.existing));
+    if(ob.logos)parts.push(completionPct(rs.logoTCV,ob.logos));
     if(ob.nrr)parts.push(completionPct(base,ob.nrr));
     const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
     body=`<div class="kpis" style="margin-top:0">
@@ -675,24 +682,24 @@ function renderMisCuentas(o){
       ${parts.length?`<label class="fld" style="margin:22px 0 10px">Objetivos y cumplimiento · ${q.label}</label>
         <div class="card" style="padding:16px 18px;margin-top:0">
           <div style="font-size:30px;font-weight:800;color:${completionColor(overall)};margin-bottom:10px">${overall}%</div>
-          ${ob.existing?meterRow('N. ventas existentes',rs.existQ,ob.existing):''}
-          ${ob.logos?meterRow('N. ventas logos',rs.logoQ,ob.logos):''}
+          ${ob.existing?meterRow('N. ventas existentes',rs.existTCV,ob.existing):''}
+          ${ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
           ${ob.nrr?meterRow('NRR · revenue Q',base,ob.nrr):''}
         </div>`:''}`;
   }else{
     const cs=viewList.filter(c=>c.client===MISCUENTAS_ACCT);
     const revByQ=revenueSeries(cs,buckets),salesByQ=newSalesSeries(cs,buckets);
-    const yearRev=revByQ.reduce((a,d)=>a+d.seeder+d.contractor,0),yearSales=salesByQ.reduce((a,d)=>a+d.existQ+d.logoQ,0);
+    const yearRev=revByQ.reduce((a,d)=>a+d.seeder+d.contractor,0),yearSales=salesByQ.reduce((a,d)=>a+d.existTCV+d.logoTCV,0);
     const refIdx=(prev||q).idx[2];
     const mesRev=cs.reduce((s,c)=>s+(c.series[refIdx]||0),0),nContr=cs.filter(c=>c.series[refIdx]>0).length;
     body=`<div class="kpis" style="margin-top:0">
         ${kpi('Net revenue '+yr,fmt(yearRev),`hoy factura ${fmt(mesRev)}/mes con ${nContr} contrato${nContr===1?'':'s'}`,'flat')}
-        ${kpi('Nuevas ventas '+yr,fmt(yearSales),'existentes + logos, ya facturando','up')}
+        ${kpi('Nuevas ventas '+yr+' (TCV)',fmt(yearSales),'existentes + logos, ya facturando','up')}
       </div>
       <label class="fld" style="margin:20px 0 10px">Net revenue por trimestre</label>
       <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(revByQ,'seeder','contractor','var(--green)','var(--purple)','Seeder','Hire','Sin revenue para esta cuenta.')}</div>
-      <label class="fld" style="margin:22px 0 10px">Nuevas ventas por trimestre</label>
-      <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesByQ,'existQ','logoQ','var(--green)','var(--amber)','Existentes','Logos nuevos','Sin nuevas ventas para esta cuenta.')}</div>`;
+      <label class="fld" style="margin:22px 0 10px">Nuevas ventas por trimestre (TCV)</label>
+      <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesByQ,'existTCV','logoTCV','var(--green)','var(--amber)','Existentes','Logos nuevos','Sin nuevas ventas para esta cuenta.')}</div>`;
   }
   $('#panel').innerHTML=`<h2><span class="n">3</span>Mis cuentas · ${o}</h2>
     <p class="sub">El book completo de tus cuentas (vendedor + CS combinado), lo real de la plataforma.</p>
@@ -733,7 +740,7 @@ function renderComercial(o){
     <label class="fld" style="margin:18px 0 10px">Real de la plataforma — ${closed?'resultado final':'en vivo'} (se actualiza solo, todas las noches)</label>
     <div class="kpis">
       ${kpi('Net revenue real '+q.label,fmt(base),closed?'resultado final':'a la fecha, va completándose','flat')}
-      ${kpi('Ventas realizadas',fmt(rs.total),'vs '+fmt(nbC.existQ+nbC.logoQ)+' proyectado',rs.total>=(nbC.existQ+nbC.logoQ)?'up':'down')}
+      ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'vs '+fmt(nbC.tcvTotal)+' proyectado',rs.totalTCV>=nbC.tcvTotal?'up':'down')}
       ${kpi('Extensiones realizadas',fmt(rx.realizedQ),'vs '+fmt(extProjC)+' proyectado',rx.realizedQ>=extProjC?'up':'down')}
       ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}
     </div>
@@ -786,14 +793,14 @@ function renderComercial(o){
   const canHaveLogos=salesList.length>0;
   const objBlock=frozen?(()=>{
       const parts=[];
-      if(ob.existing)parts.push(completionPct(rs.existQ,ob.existing));
-      if(canHaveLogos&&ob.logos)parts.push(completionPct(rs.logoQ,ob.logos));
+      if(ob.existing)parts.push(completionPct(rs.existTCV,ob.existing));
+      if(canHaveLogos&&ob.logos)parts.push(completionPct(rs.logoTCV,ob.logos));
       if(ob.nrr)parts.push(completionPct(realNRRv,ob.nrr));
       const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
       return `<h3 style="margin-top:20px">🏆 Cumplimiento ${q.label} <span style="color:#888;font-weight:500;text-transform:none">· Q cerrado</span></h3>
         ${overall!=null?`<div style="font-size:34px;font-weight:800;color:${completionColor(overall)};margin:4px 0 10px">${overall}%</div>`:'<div class="muted" style="margin:4px 0 10px">Sin metas cargadas</div>'}
-        ${ob.existing?meterRow('N. ventas existentes',rs.existQ,ob.existing):''}
-        ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoQ,ob.logos):''}
+        ${ob.existing?meterRow('N. ventas existentes',rs.existTCV,ob.existing):''}
+        ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
         ${ob.nrr?meterRow('NRR · revenue Q',realNRRv,ob.nrr):''}`;
     })():`<h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
     <table class="objt">
@@ -1297,18 +1304,19 @@ function accountBreakdown(list,buckets){
 // un contrato cuenta en el período donde arrancó a facturar de verdad, separado en existente/logo nuevo
 // según si esa cuenta ya facturaba algo antes. Usa los mismos buckets y la misma lista filtrada que el
 // gráfico de revenue, así que comparten período/cuenta/comercial/CS sin ninguna lógica extra.
+// Mide TCV (ticket mensual × duración total del contrato, vía tcvOf), no el revenue que esa venta aporta
+// a este trimestre puntual — "cuánto vendimos" y "cuánto de eso ya facturó este Q" son cosas distintas.
 // fi===0 (factura desde el primer mes que tenemos sincronizado) no cuenta como venta nueva: no hay
 // data de antes para saber si esa cuenta ya facturaba hace rato, así que se trata como base, no como
 // nueva venta del período (si no, el primer mes cargado siempre aparecería como "puro logo nuevo").
 function newSalesSeries(list,buckets){
   return buckets.map(b=>{
-    let existQ=0,logoQ=0;
+    let existTCV=0,logoTCV=0;
     list.filter(c=>{const fi=firstIdx(c);return fi>0&&b.idx.includes(fi);}).forEach(c=>{
-      const fi=firstIdx(c);
-      const real=b.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);
-      if(clientHadRevenueBefore(c.client,fi))existQ+=real;else logoQ+=real;
+      const fi=firstIdx(c);const tcv=tcvOf(c);
+      if(clientHadRevenueBefore(c.client,fi))existTCV+=tcv;else logoTCV+=tcv;
     });
-    return{label:b.label,existQ,logoQ};
+    return{label:b.label,existTCV,logoTCV};
   });
 }
 // detalle: qué cuentas arrancaron a facturar (de verdad) dentro del período completo que muestra el gráfico
@@ -1317,11 +1325,11 @@ function newSalesBreakdown(list,buckets){
   const rows=[];
   list.forEach(c=>{
     const fi=firstIdx(c);if(fi<=0||!allIdx.includes(fi))return;
-    const real=allIdx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);if(!real)return;
+    const tcv=tcvOf(c);if(!tcv)return;
     rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
-      tipo:clientHadRevenueBefore(c.client,fi)?'Existente':'Logo nuevo',revenue:real});
+      tipo:clientHadRevenueBefore(c.client,fi)?'Existente':'Logo nuevo',tcv});
   });
-  return rows.sort((a,b)=>b.revenue-a.revenue);
+  return rows.sort((a,b)=>b.tcv-a.tcv);
 }
 function consFilterBar(){
   const accts=consAccounts(),vends=people();
@@ -1397,7 +1405,7 @@ function renderConsolidated(){
     rows.push({o,inSales:sList.length>0,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
       cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
-      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExt:rx,realNRR:sumQ(list,q),
+      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExistTCV:rs.existTCV,realLogoTCV:rs.logoTCV,realExt:rx,realNRR:sumQ(list,q),
       nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
   const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
@@ -1428,11 +1436,11 @@ function renderConsolidated(){
         ${acctRows.map(r=>`<tr><td><b>${r.client}</b></td><td class="num">${r.n}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
       </tbody></table></details>`:''}
     <label class="fld" style="margin:22px 0 6px;font-size:12px">Nuevas ventas reales por ${granLabel}</label>
-    <div class="section-note" style="margin-bottom:10px"><span class="pill" style="background:#D7F5E9;color:var(--green)">Existentes</span> &nbsp;<span class="pill end-soon">Logos nuevos</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches — revenue real de contratos que arrancaron a facturar en ese período (no lo que se tipeó como proyección).</div>
-    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesData,'existQ','logoQ','var(--green)','var(--amber)','Existentes','Logos nuevos','Todavía no hay nuevas ventas reales para este filtro.')}</div>
-    ${salesRowsDet.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${salesRowsDet.length} cuenta${salesRowsDet.length===1?'':'s'} · revenue del período completo que muestra el gráfico</span></summary>
-      <table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Tipo</th><th class="num">Revenue</th></tr></thead><tbody>
-        ${salesRowsDet.map(r=>`<tr><td><b>${r.client}</b></td><td>${r.vendedor}</td><td>${r.tipo}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
+    <div class="section-note" style="margin-bottom:10px"><span class="pill" style="background:#D7F5E9;color:var(--green)">Existentes</span> &nbsp;<span class="pill end-soon">Logos nuevos</span> &nbsp;·&nbsp; TCV real (ticket mensual × duración total) de contratos que arrancaron a facturar en ese período — no lo que se tipeó como proyección, ni solo lo que ya facturó este Q.</div>
+    <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesData,'existTCV','logoTCV','var(--green)','var(--amber)','Existentes','Logos nuevos','Todavía no hay nuevas ventas reales para este filtro.')}</div>
+    ${salesRowsDet.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${salesRowsDet.length} cuenta${salesRowsDet.length===1?'':'s'} · TCV del período completo que muestra el gráfico</span></summary>
+      <table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Tipo</th><th class="num">TCV</th></tr></thead><tbody>
+        ${salesRowsDet.map(r=>`<tr><td><b>${r.client}</b></td><td>${r.vendedor}</td><td>${r.tipo}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
       </tbody></table></details>`:''}
     <div class="kpis" style="margin-top:20px">
       ${kpi('Nuevas ventas · existentes',fmt(tExist),'TCV proyectado','up')}
@@ -1444,8 +1452,8 @@ function renderConsolidated(){
   if(isFrozen(q)){
     const scored=rows.map(r=>{
       const parts=[];
-      if(r.obj.existing)parts.push(completionPct(r.realExistQ,r.obj.existing));
-      if(r.obj.logos)parts.push(completionPct(r.realLogoQ,r.obj.logos));
+      if(r.obj.existing)parts.push(completionPct(r.realExistTCV,r.obj.existing));
+      if(r.obj.logos)parts.push(completionPct(r.realLogoTCV,r.obj.logos));
       if(r.obj.nrr)parts.push(completionPct(r.realNRR,r.obj.nrr));
       if(!parts.length)return null;
       const overall=Math.round(parts.reduce((a,p)=>a+p,0)/parts.length);
@@ -1462,8 +1470,8 @@ function renderConsolidated(){
             <b style="font-size:13px">#${i+1} ${nm(r.o)}</b>
             <span style="font-size:20px;font-weight:800;color:${completionColor(r.overall)}">${r.overall}%</span>
           </div>
-          ${r.obj.existing?meterRow('N. existentes',r.realExistQ,r.obj.existing,true):''}
-          ${r.obj.logos?meterRow('Logos nuevos',r.realLogoQ,r.obj.logos,true):''}
+          ${r.obj.existing?meterRow('N. existentes',r.realExistTCV,r.obj.existing,true):''}
+          ${r.obj.logos?meterRow('Logos nuevos',r.realLogoTCV,r.obj.logos,true):''}
           ${r.obj.nrr?meterRow('NRR',r.realNRR,r.obj.nrr,true):''}
         </div>`;});
       htmlResumen+=`</div>`;
