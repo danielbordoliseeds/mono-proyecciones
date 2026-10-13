@@ -680,7 +680,7 @@ function renderComercial(o){
     <h3>Composición Q · ${q.label}</h3>
     <div class="ps-row"><span class="l">Base contratada</span><span class="r" id="ps-base">$0</span></div>
     <div class="ps-row"><span class="l">+ Extensiones</span><span class="r" id="ps-ext">$0</span></div>
-    <div class="ps-row"><span class="l">+ N. ventas existentes (Q)</span><span class="r" id="ps-newx">$0</span></div>
+    <div class="ps-row"><span class="l">+ N. ventas existentes (Q)<br><span class="muted" id="ps-newx-detail" style="font-size:10px"></span></span><span class="r" id="ps-newx">$0</span></div>
     <div class="ps-row"><span class="l">+ N. ventas logos (Q)</span><span class="r" id="ps-newl">$0</span></div>
     <div class="ps-row"><span class="l">− Bajas (churn)</span><span class="r" id="ps-churn" style="color:#ff8a8d">$0</span></div>
     <div class="ps-row tot"><span class="l">Revenue Q proyectado</span><span class="r" id="ps-tot">$0</span></div>
@@ -945,6 +945,12 @@ function sharedNewLines(o){
   });
   return out;
 }
+// TCV que una persona puntual proyectó para una cuenta puntual (ventas a cliente existente, no logos)
+function tcvForAccountFromPerson(o,account){
+  if(!o)return 0;
+  return (getState(o).newLines||[]).filter(l=>!l.isNew&&l.account===account)
+    .reduce((s,l)=>s+(+l.qty||0)*(+l.ticket||0)*(+l.dur||0),0);
+}
 function renderNbLines(){
   const {o,accts}=window.__ctx;const st=getState(o);const c=$('#nb-list');if(!c)return;c.innerHTML='';
   // filtro por cuenta (si está activo) + orden por cuándo arranca
@@ -1065,7 +1071,15 @@ function opportunities(list,q,prev){
 function recalc(){
   const ctx=window.__ctx;if(!ctx)return;const{o,q,prev,curRev}=ctx;
   const base=ctx.base;const ext=extExpected(o);const nb=newBreakdown(o);const churn=totalChurn(o,base);
-  const total=base+ext+nb.existQ+nb.logoQ-churn;
+  // proyección conjunta con la dupla: durante la transición, CS y vendedor comparten el objetivo de
+  // nuevas ventas existentes sobre la cuenta — se suma lo que cargó cada uno (nunca logos, que siguen
+  // siendo solo del vendedor). Esto NO se toca en el Consolidado: ahí cada fila sigue siendo exclusiva
+  // (solo lo propio) para que el TOTAL de la empresa no duplique cuentas compartidas.
+  let shQ=0,shTCV=0;
+  sharedNewLines(o).forEach(l=>{const qn=+l.qty||0,tk=+l.ticket||0,du=+l.dur||0,st0=+l.start||0;
+    shQ+=qn*tk*Math.max(0,Math.min(du,3-st0));shTCV+=qn*tk*du;});
+  const existQ=nb.existQ+shQ,existTCV=nb.existTCV+shTCV;
+  const total=base+ext+existQ+nb.logoQ-churn;
   // update ext cells
   $$('#panL tr[data-k]').forEach(tr=>{const k=tr.dataset.k;const cell=tr.querySelector('.ex-cell');
     if(!cell)return;const ch=tr.querySelector('.ex-c').checked;
@@ -1090,12 +1104,13 @@ function recalc(){
   const nbtQ=$('#nb-total-q');if(nbtQ)nbtQ.textContent=fmt(nbTotQ);
   const nbtT=$('#nb-total-tcv');if(nbtT)nbtT.textContent=fmt(nbTotTcv);
   const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
-  set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(nb.existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
+  set('#ps-base',fmt(base));set('#ps-ext',fmt(ext));set('#ps-newx',fmt(existQ));set('#ps-newl',fmt(nb.logoQ));set('#ps-tot',fmt(total));
+  set('#ps-newx-detail',shQ>0?`propio ${fmt(nb.existQ)} + dupla ${fmt(shQ)}`:'');
   set('#ps-churn',churn>0?'-'+fmt(churn):'$0');
   // objetivos vs proyectado
   const ob=OBJECTIVES[o]||{};
-  const nrrProj=base+ext+nb.existQ-churn;                  // NRR: cartera SIN logos, neto de bajas
-  const proj={existing:nb.existTCV,logos:nb.logoTCV,nrr:nrrProj};
+  const nrrProj=base+ext+existQ-churn;                     // NRR: cartera SIN logos, neto de bajas
+  const proj={existing:existTCV,logos:nb.logoTCV,nrr:nrrProj};
   ['existing','logos','nrr'].forEach(k=>{
     set('#o-proj-'+k,fmt(proj[k]));
     const meta=ob[k]||0;const sem=$('#o-sem-'+k);
@@ -1251,7 +1266,7 @@ function renderConsolidated(){
       cuenta:l.isNew?(l.newName||'cuenta nueva'):l.account,tipo:l.isNew?'Logo nuevo':'Existente',
       rol:l.rol||'a definir',area:l.area||'a definir',qty:+l.qty,ticket:+l.ticket,dur:+l.dur,
       tcv:(+l.qty)*(+l.ticket)*(+l.dur)}));
-    rows.push({o,inSales:sList.length>0||hasNew,inCS:list.length>0,
+    rows.push({o,inSales:sList.length>0,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
       cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
       realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExt:rx,realNRR:sumQ(list,q),
@@ -1387,17 +1402,24 @@ function renderConsolidated(){
     </tbody></table></div>
     <p class="muted" style="margin-top:6px;font-size:11.5px">Crecimiento = NRR proyectado vs revenue de ${(prev||q).label}. NRR proyectado = base + ventas existentes que cargó esta persona + extensiones − bajas (cada uno mide solo lo que él mismo proyecta, para que el TOTAL no duplique cuentas compartidas). "Extensiones" muestra lo proyectado arriba y lo que ya factura de verdad abajo. Las cuentas sin CS las cubre el vendedor, por eso puede aparecer en las dos tablas. Lo que carga la otra persona de tu dupla en una cuenta compartida se ve aparte, en "Compartidas con tu dupla" dentro de cada pestaña.</p>
 `;
-  // cuentas y duplas (solo con revenue de la plataforma, que trae vendedor y CS por cuenta)
+  // cuentas y duplas (solo con revenue de la plataforma, que trae vendedor y CS por cuenta) — incluye
+  // cuánto proyectó cada uno de nuevas ventas (existentes) sobre esa cuenta puntual y el total conjunto:
+  // es la proyección que CS y vendedor comparten durante la transición, mientras el objetivo lo seteás
+  // vos a mano por persona en base a ese total (no hace falta que el sistema lo reparta ni lo sume aparte).
   if(Object.keys(DUPLA).length){
     const ref=prev||q;
     const accs=[...act].map(a=>{const cs=all.filter(c=>c.client===a);
-      return{a,v:ownerOf(a),cs:(DUPLA[a]&&DUPLA[a].cs)||'',rev:sumQ(cs,ref),base:sumQ(cs,q),n:cs.filter(c=>c.series[ref.idx[2]]>0).length};})
+      const v=ownerOf(a),csP=(DUPLA[a]&&DUPLA[a].cs)||'';
+      const vProj=tcvForAccountFromPerson(v,a),csProj=csP?tcvForAccountFromPerson(csP,a):0;
+      return{a,v,cs:csP,rev:sumQ(cs,ref),base:sumQ(cs,q),n:cs.filter(c=>c.series[ref.idx[2]]>0).length,vProj,csProj};})
       .sort((x,y)=>y.rev-x.rev);
-    html+=`<details class="logo-group" style="margin:24px 0 8px"><summary><span class="co">Cuentas y duplas</span><span class="lg-meta">${accs.length} cuentas · el vendedor proyecta ventas nuevas y el CS extensiones y bajas</span></summary>
-      <div style="overflow-x:auto"><table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>CS</th><th class="num">Revenue ${ref.label}</th><th class="num">Base ${q.label}</th><th class="num">Contratos</th></tr></thead><tbody>`;
+    html+=`<details class="logo-group" style="margin:24px 0 8px"><summary><span class="co">Cuentas y duplas</span><span class="lg-meta">${accs.length} cuentas · proyección conjunta de nuevas ventas (existentes) entre vendedor y CS</span></summary>
+      <div style="overflow-x:auto"><table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>CS</th><th class="num">Revenue ${ref.label}</th><th class="num">Base ${q.label}</th><th class="num">Contratos</th><th class="num">Proy. vendedor (TCV)</th><th class="num">Proy. CS (TCV)</th><th class="num">Total conjunto</th></tr></thead><tbody>`;
     accs.forEach(x=>{html+=`<tr><td><b>${x.a}</b></td><td>${x.v.replace(' (Mono)','')}</td>
       <td>${x.cs?x.cs.replace(' (Mono)',''):'<span class="muted">sin CS · lo hace el vendedor</span>'}</td>
-      <td class="num">${fmt(x.rev)}</td><td class="num">${fmt(x.base)}</td><td class="num">${x.n}</td></tr>`;});
+      <td class="num">${fmt(x.rev)}</td><td class="num">${fmt(x.base)}</td><td class="num">${x.n}</td>
+      <td class="num">${fmt(x.vProj)}</td><td class="num">${x.cs?fmt(x.csProj):'<span class="muted">—</span>'}</td>
+      <td class="num"><b>${fmt(x.vProj+x.csProj)}</b></td></tr>`;});
     html+='</tbody></table></div></details>';
   }
   // Brief Talent Acquisition (todos los nuevos)
