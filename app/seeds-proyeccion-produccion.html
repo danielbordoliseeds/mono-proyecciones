@@ -491,8 +491,11 @@ function init(){
   const nowKey=`${tgt.getFullYear()}-${String(tgt.getMonth()+1).padStart(2,'0')}`;const curQ=QUARTERS.find(q=>q.idx.some(i=>MONTHS[i].key===nowKey));
   qsel.value=(curQ&&[...qsel.options].some(op=>op.value===curQ.id)?curQ.id:(QUARTERS[Math.max(1,QUARTERS.length-2)]||{}).id)||qsel.value;
   qsel.onchange=()=>{MARKS={};MARKS_DIRTY.clear();buildTabs();render();refreshDeadlineCtrl();refreshRevenueCard();
-    if(typeof loadMarks==='function')loadMarks().then(()=>render());
-    if(typeof loadDeadlines==='function')loadDeadlines().then(()=>{refreshDeadlineCtrl();render();});};
+    if(typeof loadProjections==='function')loadProjections().then(()=>{refreshDeadlineCtrl();refreshRevenueCard();render();});
+    else{
+      if(typeof loadMarks==='function')loadMarks().then(()=>render());
+      if(typeof loadDeadlines==='function')loadDeadlines().then(()=>{refreshDeadlineCtrl();render();});
+    }};
   $('#growth').oninput=render;{const cp=$('#churnpct');if(cp)cp.oninput=render;}
   setupDeadlineCtrl();refreshDeadlineCtrl();refreshRevenueCard();
   // aterrizar en una pestaña con motor (no en el consolidado de solo lectura)
@@ -1931,9 +1934,12 @@ drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTrans
     if(!SB||!CURRENT_USER||!QUARTERS.length)return;
     const{data,error}=await SB.from('projections').select('comercial_name,growth_pct,payload').eq('quarter',projQ().id);
     if(error||!data)return;
+    // limpiar antes de repoblar: si no, al cambiar de trimestre alguien sin proyección guardada para el
+    // nuevo Q se queda viendo (sin darse cuenta) lo que había cargado en el trimestre anterior
+    Object.keys(STATE).forEach(k=>delete STATE[k]);
     data.forEach(r=>{STATE[r.comercial_name]={
       newLines:(r.payload&&r.payload.newLines)||[],unchecked:(r.payload&&r.payload.unchecked)||{},prob:(r.payload&&r.payload.prob)||{},
-      extTicket:(r.payload&&r.payload.extTicket)||{},extDur:(r.payload&&r.payload.extDur)||{},extStart:(r.payload&&r.payload.extStart)||{},churn:(r.payload&&r.payload.churn)||{},prob:{}};});
+      extTicket:(r.payload&&r.payload.extTicket)||{},extDur:(r.payload&&r.payload.extDur)||{},extStart:(r.payload&&r.payload.extStart)||{},churn:(r.payload&&r.payload.churn)||{}};});
     await window.loadMarks();
     await window.loadObjectives();
     await window.loadDeadlines();
