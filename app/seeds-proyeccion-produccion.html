@@ -249,6 +249,7 @@ const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(
 const fmt=n=>'$'+Math.round(n||0).toLocaleString('es-AR');
 let MONTHS=[],CONTRACTS=[],QUARTERS=[],DEALS=[];
 let OBJECTIVES={};
+let CONS_OBJECTIVES={existing:0,logos:0,nrr:0}; // objetivo de toda la empresa, visible para todos en el Consolidado
 let DEADLINES={};
 let CURRENT_USER=null, SB=null;
 const STATE={}; // per-comercial {ext:{key:{prob}}, unchecked:Set, newLines:[]}
@@ -1538,7 +1539,28 @@ function renderConsolidated(){
   const salesData=newSalesSeries(filteredList,buckets);
   const salesRowsDet=newSalesBreakdown(filteredList,buckets);
   const granLabel=CONS_FILTER.gran==='month'?'mes':CONS_FILTER.gran==='year'?'año':'trimestre';
-  let htmlResumen=`<label class="fld" style="margin:20px 0 4px">Gráficos</label>
+  // ---- Objetivo de la empresa: un solo objetivo para todo Seeds (no por persona), visible para
+  // cualquiera en el Consolidado. Usa CONTRACTS directo (no "all"/activeAccounts, que deja afuera un
+  // logo nuevo sin revenue en el Q base) y nunca respeta CONS_FILTER — es el total real de la empresa,
+  // siempre, tal como los gráficos de abajo. Lo real se compara siempre contra el Q que se mira arriba.
+  const companySales=newSalesSeries(CONTRACTS,[{label:q.label,idx:q.idx}])[0]||{existTCV:0,logoTCV:0};
+  const companyRevenue=sumQ(CONTRACTS,q);
+  const isAdminCO=!CURRENT_USER||CURRENT_USER.role==='admin';
+  const coMetaCell=(k)=>isAdminCO
+    ?`<input class="obj-in-co" data-k="${k}" type="number" min="0" step="1000" value="${CONS_OBJECTIVES[k]||''}" placeholder="—">`
+    :`<span>${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'<span class="muted">sin meta</span>'}</span>`;
+  const semCell=(real,meta)=>!meta?`<td class="sem" style="color:#777">—</td>`:(real>=meta?`<td class="sem" style="color:var(--green-bright)">✓</td>`:`<td class="sem" style="color:#ff8a8d">${fmt(real-meta)}</td>`);
+  let htmlResumen=`<label class="fld" style="margin:20px 0 10px">Objetivo de la empresa · ${q.label}</label>
+    <div class="card" style="padding:16px 18px;margin-top:0">
+      <table class="objt">
+        <tr><th>Objetivo</th><th>Meta</th><th>Real</th><th></th></tr>
+        <tr><td>Ventas nuevas · existentes (TCV)</td><td>${coMetaCell('existing')}</td><td class="num">${fmt(companySales.existTCV)}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
+        <tr><td>Ventas nuevas · logos (TCV)</td><td>${coMetaCell('logos')}</td><td class="num">${fmt(companySales.logoTCV)}</td>${semCell(companySales.logoTCV,CONS_OBJECTIVES.logos)}</tr>
+        <tr><td>Revenue (NRR, Q)</td><td>${coMetaCell('nrr')}</td><td class="num">${fmt(companyRevenue)}</td>${semCell(companyRevenue,CONS_OBJECTIVES.nrr)}</tr>
+      </table>
+      ${isAdminCO?`<div class="row-actions" style="margin-top:10px"><button class="btn ghost" id="btn-co-obj">Guardar objetivo</button><span class="saved-flag" id="co-obj-flag"></span></div>`:''}
+    </div>
+    <label class="fld" style="margin:20px 0 4px">Gráficos</label>
     ${consFilterBar()}
     <label class="fld" style="margin:4px 0 6px;font-size:12px">Revenue real por ${granLabel}</label>
     <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Hire</span> &nbsp;·&nbsp; de la serie sincronizada cada 2 horas — revenue real, no depende de cartera ni de quién lo proyecta.</div>
@@ -1716,6 +1738,11 @@ function renderConsolidated(){
   const cfa=$('#cf-acct');if(cfa)cfa.onchange=e=>{CONS_FILTER.account=e.target.value;render();};
   const cfv=$('#cf-vend');if(cfv)cfv.onchange=e=>{CONS_FILTER.vendedor=e.target.value;render();};
   const cfc=$('#cf-cs');if(cfc)cfc.onchange=e=>{CONS_FILTER.cs=e.target.value;render();};
+  const btnCO=$('#btn-co-obj');if(btnCO)btnCO.onclick=async()=>{
+    const vals={existing:0,logos:0,nrr:0};$$('#panel .obj-in-co').forEach(inp=>vals[inp.dataset.k]=parseFloat(inp.value)||0);
+    const flag=$('#co-obj-flag');if(flag)flag.textContent='Guardando…';
+    if(typeof saveConsObjectives==='function')await saveConsObjectives(vals,flag);else if(flag)flag.textContent='';
+    render();};
   $$('#panel .score-card').forEach(card=>card.onclick=()=>{ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
 }
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
@@ -2051,6 +2078,7 @@ drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTrans
       extTicket:(r.payload&&r.payload.extTicket)||{},extDur:(r.payload&&r.payload.extDur)||{},extStart:(r.payload&&r.payload.extStart)||{},churn:(r.payload&&r.payload.churn)||{}};});
     await window.loadMarks();
     await window.loadObjectives();
+    await window.loadConsObjectives();
     await window.loadDeadlines();
   };
   window.loadMarks=async function(){
@@ -2065,6 +2093,21 @@ drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTrans
     if(error||!data)return;
     OBJECTIVES={};
     data.forEach(r=>{OBJECTIVES[r.comercial_name]={existing:+r.target_existing||0,logos:+r.target_logos||0,nrr:+r.target_nrr||0};});
+  };
+  window.loadConsObjectives=async function(){
+    CONS_OBJECTIVES={existing:0,logos:0,nrr:0};
+    if(!SB||!CURRENT_USER||!QUARTERS.length)return;
+    const{data,error}=await SB.from('consolidado_objectives').select('target_existing,target_logos,target_nrr').eq('quarter',projQ().id).maybeSingle();
+    if(error||!data)return;
+    CONS_OBJECTIVES={existing:+data.target_existing||0,logos:+data.target_logos||0,nrr:+data.target_nrr||0};
+  };
+  window.saveConsObjectives=async function(vals,flagEl){
+    if(!SB||!CURRENT_USER||CURRENT_USER.role!=='admin'){if(flagEl)flagEl.textContent='Iniciá sesión como admin.';return;}
+    const row={quarter:projQ().id,target_existing:vals.existing||0,target_logos:vals.logos||0,target_nrr:vals.nrr||0,updated_by:CURRENT_USER.id,updated_at:new Date().toISOString()};
+    const{error}=await SB.from('consolidado_objectives').upsert(row,{onConflict:'quarter'});
+    if(!error)CONS_OBJECTIVES={existing:row.target_existing,logos:row.target_logos,nrr:row.target_nrr};
+    if(flagEl)flagEl.textContent=error?('Error: '+error.message+' — ¿corriste db/schema_consolidado_objetivos.sql en Supabase?'):'✓ Objetivo guardado';
+    if(flagEl&&!error)setTimeout(()=>{flagEl.textContent='';},4000);
   };
   window.loadDeadlines=async function(){
     if(!SB||!CURRENT_USER)return;
