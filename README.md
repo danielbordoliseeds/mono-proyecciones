@@ -14,7 +14,7 @@ App web de un solo archivo (`web/index.html`) que corre sobre:
 - **Supabase** — autenticación (magic-link por email) + base de datos (proyecciones, objetivos, snapshots de revenue).
 - **Netlify** — hosting del sitio estático. Cada push a `main` lo publica la GitHub Action `.github/workflows/deploy.yml`.
 
-El revenue ya **no se sube a mano**: el sync nocturno (`sync/`) lo trae de la plataforma con la dupla
+El revenue ya **no se sube a mano**: el sync (`sync/`) lo trae de la plataforma cada 2 horas, con la dupla
 vendedor + CS de cada cuenta. El pipeline de HubSpot todavía entra por CSV desde la app. Detalle en `V2_SPEC.md`.
 
 ## Estructura
@@ -24,7 +24,7 @@ app/    → la aplicación (fuente)
   seeds-proyeccion-produccion.html ← plantilla canónica (claves placeholder) — TODA edición va acá
   build.sh                         ← genera web/index.html inyectando la URL y la clave pública
 web/    → LO QUE PUBLICA NETLIFY (ver netlify.toml): favicon.ico + index.html (lo genera el build, no se commitea)
-sync/   → sync nocturno plataforma → Supabase (Lambda en AWS, ver sync/README.md)
+sync/   → sync plataforma → Supabase, cada 2 horas (Lambda en AWS, ver sync/README.md)
 db/     → esquema de Supabase (correr en orden)
   schema.sql            ← base: profiles, projections, revenue_snapshots, RLS, triggers
   schema_objetivos.sql  ← tabla de objetivos

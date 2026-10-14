@@ -1,6 +1,6 @@
-# Sync nocturno: plataforma → Supabase
+# Sync: plataforma → Supabase
 
-Reemplaza la carga manual del CSV de Power BI. Todas las noches, a las 03:00 hora Argentina, la Lambda
+Reemplaza la carga manual del CSV de Power BI. Cada 2 horas, en punto (hora Argentina), la Lambda
 `proyecciones-sync` arma la fila `dataset` de `revenue_snapshots` con el revenue de la plataforma y
 la escribe en Supabase. La app la lee igual que antes.
 
@@ -12,7 +12,7 @@ la escribe en Supabase. La app la lee igual que antes.
   de escribir, copia la carga anterior en la fila `dataset-anterior`.
 - **Clave de Supabase:** en SSM (`/proyecciones-sync/supabase-key`), nunca en el código.
 
-> Si alguien sube un CSV a mano desde la app, esa misma noche lo pisa el sync.
+> Si alguien sube un CSV a mano desde la app, lo pisa el sync en la próxima corrida (máximo 2 horas).
 
 ## Uso
 

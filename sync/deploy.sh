@@ -78,7 +78,7 @@ fi
 aws iam put-role-policy --role-name "$SCHED_ROLE_NAME" --policy-name invoke-proyecciones-sync --policy-document \
   '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"lambda:InvokeFunction","Resource":"'"${FUNCTION_ARN}"'"}]}'
 
-SCHED_ARGS=(--name "$SCHEDULE_NAME" --schedule-expression "cron(0 3 * * ? *)"
+SCHED_ARGS=(--name "$SCHEDULE_NAME" --schedule-expression "cron(0 */2 * * ? *)"
   --schedule-expression-timezone "America/Argentina/Buenos_Aires" --flexible-time-window Mode=OFF
   --target "Arn=${FUNCTION_ARN},RoleArn=arn:aws:iam::${ACCOUNT_ID}:role/${SCHED_ROLE_NAME}")
 if aws scheduler get-schedule --name "$SCHEDULE_NAME" >/dev/null 2>&1; then
@@ -88,5 +88,5 @@ else
 fi
 rm -f function.zip
 
-echo ">> Listo. Corre todos los días a las 03:00 (hora Argentina)."
+echo ">> Listo. Corre cada 2 horas, en punto (hora Argentina)."
 echo ">> Para correrlo ahora:  aws lambda invoke --function-name ${FUNCTION_NAME} out.json && cat out.json"

@@ -205,7 +205,7 @@ details.howto b{color:var(--ink)}
   <!-- 1. CARGA -->
   <div class="card">
     <h2><span class="n">1</span>Revenue</h2>
-    <p class="sub">Se sincroniza solo con la plataforma todas las noches (contratos firmados, ganancia mensual en USD). Ya no hace falta cargar el export de Power BI. Solo se consideran cuentas que facturan en el trimestre base.</p>
+    <p class="sub">Se sincroniza solo con la plataforma cada 2 horas (contratos firmados, ganancia mensual en USD). Ya no hace falta cargar el export de Power BI. Solo se consideran cuentas que facturan en el trimestre base.</p>
     <div class="loaded" id="loaded">✓ <span id="loaded-txt"></span></div>
     <div class="kpis hidden" id="revenue-kpis" style="margin-top:14px"></div>
   </div>
@@ -849,7 +849,7 @@ function renderComercial(o){
     ${Object.keys(DUPLA).length?(()=>{const nv=new Set(salesList.map(c=>c.client)).size,nr=new Set(list.map(c=>c.client)).size;
       return `<p class="sub">Vendedor en <b>${nv}</b> cuenta${nv===1?'':'s'} (proyectás ventas nuevas) · a cargo de extensiones y bajas en <b>${nr}</b> (como CS, o como vendedor si la cuenta no tiene CS).</p>`;})():''}
     ${frozen?`<div class="section-note" style="border-color:var(--red)">🔒 Proyección de ${q.label} cerrada el ${new Date(DEADLINES[q.id]).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'})} — a partir de acá se contrasta directo contra el resultado real, ya no se puede editar.</div>`:''}
-    <label class="fld" style="margin:18px 0 10px">Real de la plataforma — ${closed?'resultado final':'en vivo'} (se actualiza solo, todas las noches)</label>
+    <label class="fld" style="margin:18px 0 10px">Real de la plataforma — ${closed?'resultado final':'en vivo'} (se actualiza solo, cada 2 horas)</label>
     <div class="kpis">
       ${kpi('Net revenue real '+q.label,fmt(base),closed?'resultado final':'a la fecha, va completándose','flat')}
       ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'vs '+fmt(nbC.tcvTotal)+' proyectado',rs.totalTCV>=nbC.tcvTotal?'up':'down')}
@@ -1541,7 +1541,7 @@ function renderConsolidated(){
   let htmlResumen=`<label class="fld" style="margin:20px 0 4px">Gráficos</label>
     ${consFilterBar()}
     <label class="fld" style="margin:4px 0 6px;font-size:12px">Revenue real por ${granLabel}</label>
-    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Hire</span> &nbsp;·&nbsp; de la serie sincronizada todas las noches — revenue real, no depende de cartera ni de quién lo proyecta.</div>
+    <div class="section-note" style="margin-bottom:10px"><span class="pill seeder">Seeder</span> &nbsp;<span class="pill contractor">Hire</span> &nbsp;·&nbsp; de la serie sincronizada cada 2 horas — revenue real, no depende de cartera ni de quién lo proyecta.</div>
     <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(revData,'seeder','contractor','var(--green)','var(--purple)','Seeder','Hire','Todavía no hay revenue sincronizado para este filtro.')}</div>
     ${acctRows.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${acctRows.length} cuenta${acctRows.length===1?'':'s'} · revenue del período completo que muestra el gráfico</span></summary>
       <table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Revenue</th></tr></thead><tbody>
@@ -1614,7 +1614,7 @@ function renderConsolidated(){
       <td class="num"><b>${fmt(sQ)}</b></td>
       ${metaTd(sQ,sR)}</tr>
     </tbody></table></div>
-    <p class="muted" style="margin-top:6px;font-size:11.5px">"Real de la plataforma" = ventas nuevas que ya están facturando en ${q.label}, de la serie sincronizada todas las noches — se compara contra "Impacto ${q.label}" (lo proyectado).</p>`;
+    <p class="muted" style="margin-top:6px;font-size:11.5px">"Real de la plataforma" = ventas nuevas que ya están facturando en ${q.label}, de la serie sincronizada cada 2 horas — se compara contra "Impacto ${q.label}" (lo proyectado).</p>`;
   if(allLogos.length){
     htmlVentas+=`<details class="logo-group" style="margin-top:16px" open><summary><span class="co">Logos nuevos</span><span class="lg-meta">${allLogos.length} cuenta${allLogos.length===1?'':'s'} nueva${allLogos.length===1?'':'s'} proyectada${allLogos.length===1?'':'s'} · ${fmt(allLogos.reduce((a,l)=>a+l.tcv,0))} TCV</span></summary>
       <table class="lg-roles"><thead><tr><th>Vendedor</th><th>Empresa</th><th>Rol</th><th class="num">Cantidad</th><th class="num">TCV</th></tr></thead><tbody>`;
