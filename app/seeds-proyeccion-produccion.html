@@ -257,6 +257,8 @@ let ACCT_FILTER=''; // filtro de cuenta dentro de la pestaña de una persona (ex
 let CONS_FILTER={gran:'quarter',account:'',vendedor:'',cs:''}; // filtros de los gráficos del Consolidado
 let PERSON_SECTION='home'; // 'home' | 'cuentas' | 'q' | 'semanal' — qué ve un comercial/CS de sí mismo
 let MISCUENTAS_ACCT=''; // cuenta elegida dentro de "Mis cuentas" ('' = Resumen)
+let MISCUENTAS_GRAN='year'; // granularidad del filtro de tiempo del Resumen de "Mis cuentas"
+let MISCUENTAS_PERIOD_IDX=null; // qué período puntual de esa granularidad (null = el más reciente)
 let CONS_TAB='resumen'; // pestaña activa dentro del Consolidado
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
@@ -669,6 +671,24 @@ function incentiveLock(ob,realExistTCV,realNRR){
   const nrrOk=cNrr==null||cNrr>=75;
   return{locked:!(existOk&&nrrOk),existOk,nrrOk};
 }
+// tabla de la curva de cumplimiento → % que aporta, para el desplegable "¿Cómo se calcula esto?"
+// (una sola fuente de verdad: sale directo de BONO_CURVES, no se tipea de nuevo)
+function bonoCurveTableHTML(){
+  const thresholds=BONO_CURVES.logos.map(([th])=>th);
+  const rows=thresholds.map((th,i)=>`<tr><td>${th}%${th===100?'+':''}</td><td class="num">${BONO_CURVES.logos[i][1]}%</td><td class="num">${BONO_CURVES.existing[i][1]}%</td><td class="num">${BONO_CURVES.nrr[i][1]}%</td></tr>`).join('');
+  return `<table class="lg-roles"><thead><tr><th>Cumplimiento real</th><th class="num">Logos nuevos</th><th class="num">Ventas existentes</th><th class="num">NRR</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function objectiveRulesHTML(canHaveLogos){
+  return `<details class="logo-group" style="margin-top:16px;text-align:left"><summary><span class="co">¿Cómo se calcula este %?</span><span class="lg-meta">reglas del incentivo</span></summary>
+    <div style="padding:12px 14px;font-size:12.5px;line-height:1.6">
+      <p><b>Candados</b> — hay que liberarlos para empezar a cobrar incentivos: 50% de cumplimiento en N. ventas existentes, y 75% en NRR. N. ventas logos no tiene candado propio. Mientras falte liberar alguno de los dos, el % total se muestra bloqueado en 0%, aunque alguna métrica ya esté alta.</p>
+      <p><b>Peso de cada objetivo en el total:</b> ${canHaveLogos?'33% N. ventas logos · 33% N. ventas existentes · 33% NRR':'40% N. ventas existentes · 60% NRR (no tenés objetivo de logos nuevos)'}.</p>
+      <p><b>Cumplimiento real → % que aporta</b> (por tramos, no 1 a 1 — el real "entra" en el escalón más alto que no supera):</p>
+      ${bonoCurveTableHTML()}
+      <p class="muted" style="margin-top:8px">Ejemplo: si tu NRR real está al 91% de la meta, aporta 33% (el escalón de 90%, no un 91% a secas). Pasado el 100% no hay techo: aporta el % real tal cual. El total es el promedio ponderado de lo que aporta cada objetivo que tengas cargado (los candados liberados).</p>
+    </div>
+  </details>`;
+}
 function renderHome(o){
   const{viewList,salesList,q,rs,rx,base}=personSummary(o);
   const closed=isQuarterClosed(q);
@@ -689,6 +709,7 @@ function renderHome(o){
         ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
         ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),base,ob.nrr):''}
       </div>
+      ${objectiveRulesHTML(canHaveLogos)}
     </div>`:`<div class="section-note" style="margin-top:0">Todavía no tenés objetivo cargado para ${q.label} — lo carga el admin.</div>`;
   const html=`<h2><span class="n">3</span>${o} · ${q.label}</h2>
     <p class="sub">Lo real, tal como lo ve la plataforma. Para cargar tu proyección andá a "Proyección del Q"; para el detalle por cuenta, a "Mis cuentas".</p>
@@ -716,17 +737,39 @@ function renderMisCuentas(o){
   </div>`;
   let body;
   if(!MISCUENTAS_ACCT){
-    const yearRevSeries=revenueSeries(viewList,buckets);
-    const yearSalesSeries=newSalesSeries(viewList,buckets);
-    const yearRevenue=yearRevSeries.reduce((a,d)=>a+d.seeder+d.contractor,0);
-    const yearExist=yearSalesSeries.reduce((a,d)=>a+d.existTCV,0),yearLogo=yearSalesSeries.reduce((a,d)=>a+d.logoTCV,0);
+    const periodBucketsAll=periodBuckets(MISCUENTAS_GRAN);
+    if(MISCUENTAS_PERIOD_IDX==null||MISCUENTAS_PERIOD_IDX>=periodBucketsAll.length)MISCUENTAS_PERIOD_IDX=periodBucketsAll.length-1;
+    const pb=periodBucketsAll[MISCUENTAS_PERIOD_IDX];
+    const selBuckets=pb?[pb]:[];
+    const periodLabel=pb?pb.label:yr;
+    const granLabel=MISCUENTAS_GRAN==='month'?'Mes':MISCUENTAS_GRAN==='year'?'Año':'Trimestre';
+    const filterHtml=`<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label class="fld" style="margin:0;font-size:10px">Período</label>
+        <select id="mc-gran" style="min-width:120px">
+          <option value="month"${MISCUENTAS_GRAN==='month'?' selected':''}>Mes</option>
+          <option value="quarter"${MISCUENTAS_GRAN==='quarter'?' selected':''}>Trimestre</option>
+          <option value="year"${MISCUENTAS_GRAN==='year'?' selected':''}>Año</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label class="fld" style="margin:0;font-size:10px">${granLabel}</label>
+        <select id="mc-period" style="min-width:140px">
+          ${periodBucketsAll.map((b,i)=>`<option value="${i}"${i===MISCUENTAS_PERIOD_IDX?' selected':''}>${b.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+    const periodRevSeries=revenueSeries(viewList,selBuckets);
+    const periodSalesSeries=newSalesSeries(viewList,selBuckets);
+    const periodRevenue=periodRevSeries.reduce((a,d)=>a+d.seeder+d.contractor,0);
+    const periodExist=periodSalesSeries.reduce((a,d)=>a+d.existTCV,0),periodLogo=periodSalesSeries.reduce((a,d)=>a+d.logoTCV,0);
     const refIdx=(prev||q).idx[2];
     const byAcct=accts.map(a=>{
       const cs=viewList.filter(c=>c.client===a);
-      const revYear=buckets.reduce((s,b)=>s+b.idx.reduce((s2,i)=>s2+cs.reduce((s3,c)=>s3+(c.series[i]||0),0),0),0);
+      const revPeriod=selBuckets.reduce((s,b)=>s+b.idx.reduce((s2,i)=>s2+cs.reduce((s3,c)=>s3+(c.series[i]||0),0),0),0);
       const revMes=cs.reduce((s,c)=>s+(c.series[refIdx]||0),0);
-      const salesYear=newSalesSeries(cs,buckets).reduce((s,d)=>s+d.existTCV+d.logoTCV,0);
-      return{a,n:cs.length,revYear,revMes,salesYear};
+      const salesPeriod=newSalesSeries(cs,selBuckets).reduce((s,d)=>s+d.existTCV+d.logoTCV,0);
+      return{a,n:cs.length,revPeriod,revMes,salesPeriod};
     }).sort((x,y)=>y.revMes-x.revMes);
     const totalMes=byAcct.reduce((s,x)=>s+x.revMes,0);
     const top=byAcct[0];
@@ -735,15 +778,16 @@ function renderMisCuentas(o){
     if(ob.logos)parts.push(completionPct(rs.logoTCV,ob.logos));
     if(ob.nrr)parts.push(completionPct(base,ob.nrr));
     const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
-    body=`<div class="kpis" style="margin-top:0">
-        ${kpi('Ventas nuevas · existentes '+yr,fmt(yearExist),'clientes con relación previa','up')}
-        ${kpi('Ventas nuevas · logos '+yr,fmt(yearLogo),'cuentas nuevas','up')}
-        ${kpi('Net revenue total '+yr,fmt(yearRevenue),'todo: nuevos, extensiones y vigentes','flat')}
+    body=`${filterHtml}
+      <div class="kpis" style="margin-top:0">
+        ${kpi('Ventas nuevas · existentes '+periodLabel,fmt(periodExist),'clientes con relación previa','up')}
+        ${kpi('Ventas nuevas · logos '+periodLabel,fmt(periodLogo),'cuentas nuevas','up')}
+        ${kpi('Net revenue total '+periodLabel,fmt(periodRevenue),'todo: nuevos, extensiones y vigentes','flat')}
       </div>
       ${top&&totalMes?`<div class="section-note" style="margin-top:14px">${top.a} concentra <b style="color:var(--green)">${Math.round(top.revMes/totalMes*100)}%</b> de tu net revenue mensual.</div>`:''}
-      <label class="fld" style="margin:20px 0 10px">Tus cuentas</label>
-      <div style="overflow-x:auto"><table><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Net revenue ${yr}</th><th class="num">Net revenue/mes</th><th class="num">% cartera</th><th class="num">Nuevas ventas ${yr}</th></tr></thead><tbody>
-        ${byAcct.map(x=>`<tr class="acct-row" data-acct="${x.a}" style="cursor:pointer"><td><b>${x.a}</b></td><td class="num">${x.n}</td><td class="num">${fmt(x.revYear)}</td><td class="num">${fmt(x.revMes)}</td><td class="num">${totalMes?Math.round(x.revMes/totalMes*100):0}%</td><td class="num">${fmt(x.salesYear)}</td></tr>`).join('')}
+      <label class="fld" style="margin:20px 0 10px">Tus cuentas · ${periodLabel}</label>
+      <div style="overflow-x:auto"><table><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Net revenue ${periodLabel}</th><th class="num">Net revenue/mes</th><th class="num">% cartera</th><th class="num">Nuevas ventas ${periodLabel}</th></tr></thead><tbody>
+        ${byAcct.map(x=>`<tr class="acct-row" data-acct="${x.a}" style="cursor:pointer"><td><b>${x.a}</b></td><td class="num">${x.n}</td><td class="num">${fmt(x.revPeriod)}</td><td class="num">${fmt(x.revMes)}</td><td class="num">${totalMes?Math.round(x.revMes/totalMes*100):0}%</td><td class="num">${fmt(x.salesPeriod)}</td></tr>`).join('')}
       </tbody></table></div>
       ${parts.length?`<label class="fld" style="margin:22px 0 10px">Objetivos y cumplimiento · ${q.label}</label>
         <div class="card" style="padding:16px 18px;margin-top:0">
@@ -771,6 +815,8 @@ function renderMisCuentas(o){
     <p class="sub">El book completo de tus cuentas (vendedor + CS combinado), lo real de la plataforma.</p>
     ${tabsHtml}${body}`;
   $$('#panel .tab[data-acct], #panel .acct-row[data-acct]').forEach(el=>el.onclick=()=>{MISCUENTAS_ACCT=el.dataset.acct;render();});
+  const mcg=$('#mc-gran');if(mcg)mcg.onchange=e=>{MISCUENTAS_GRAN=e.target.value;MISCUENTAS_PERIOD_IDX=null;render();};
+  const mcp=$('#mc-period');if(mcp)mcp.onchange=e=>{MISCUENTAS_PERIOD_IDX=+e.target.value;render();};
 }
 
 function renderComercial(o){
