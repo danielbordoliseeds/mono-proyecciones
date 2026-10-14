@@ -727,7 +727,7 @@ function renderHome(o){
 // con revenue y nuevas ventas reales por trimestre (mismos helpers que los gráficos del Consolidado) y
 // el objetivo/cumplimiento del Q en curso.
 function renderMisCuentas(o){
-  const{viewList,q,prev,base,rs,accts}=personSummary(o);
+  const{viewList,salesList,q,prev,base,rs,accts}=personSummary(o);
   if(MISCUENTAS_ACCT&&!accts.includes(MISCUENTAS_ACCT))MISCUENTAS_ACCT='';
   const buckets=periodBuckets('quarter');
   const yr=QUARTERS.length?QUARTERS[QUARTERS.length-1].y:'';
@@ -774,11 +774,12 @@ function renderMisCuentas(o){
     }).sort((x,y)=>y.revMes-x.revMes);
     const totalMes=byAcct.reduce((s,x)=>s+x.revMes,0);
     const top=byAcct[0];
-    const parts=[];
-    if(ob.existing)parts.push(completionPct(rs.existTCV,ob.existing));
-    if(ob.logos)parts.push(completionPct(rs.logoTCV,ob.logos));
-    if(ob.nrr)parts.push(completionPct(base,ob.nrr));
-    const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
+    const canHaveLogos=salesList.length>0;
+    const lock=incentiveLock(ob,rs.existTCV,base);
+    const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,base,canHaveLogos);
+    const overall=liveRaw==null?null:(lock.locked?0:liveRaw);
+    const missing=[];if(!lock.existOk)missing.push('50% en N. ventas existentes');if(!lock.nrrOk)missing.push('75% en NRR');
+    const lockNote=(liveRaw!=null&&lock.locked)?`<div class="pill end-now" style="margin-top:8px;display:inline-block;font-size:11px">🔒 Bloqueado — falta ${missing.join(' y ')} para empezar a cobrar incentivos</div>`:'';
     body=`${filterHtml}
       <div class="kpis" style="margin-top:0">
         ${kpi('Ventas nuevas · existentes '+periodLabel,fmt(periodExist),'clientes con relación previa','up')}
@@ -790,12 +791,14 @@ function renderMisCuentas(o){
       <div style="overflow-x:auto"><table><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Net revenue ${periodLabel}</th><th class="num">Net revenue/mes</th><th class="num">% cartera</th><th class="num">Nuevas ventas ${periodLabel}</th></tr></thead><tbody>
         ${byAcct.map(x=>`<tr class="acct-row" data-acct="${x.a}" style="cursor:pointer"><td><b>${x.a}</b></td><td class="num">${x.n}</td><td class="num">${fmt(x.revPeriod)}</td><td class="num">${fmt(x.revMes)}</td><td class="num">${totalMes?Math.round(x.revMes/totalMes*100):0}%</td><td class="num">${fmt(x.salesPeriod)}</td></tr>`).join('')}
       </tbody></table></div>
-      ${parts.length?`<label class="fld" style="margin:22px 0 10px">Objetivos y cumplimiento · ${q.label}</label>
+      ${liveRaw!=null?`<label class="fld" style="margin:22px 0 10px">Objetivos y cumplimiento · ${q.label}</label>
         <div class="card" style="padding:16px 18px;margin-top:0">
           <div style="font-size:30px;font-weight:800;color:${completionColor(overall)};margin-bottom:10px">${overall}%</div>
-          ${ob.existing?meterRow('N. ventas existentes',rs.existTCV,ob.existing):''}
-          ${ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
-          ${ob.nrr?meterRow('NRR · revenue Q',base,ob.nrr):''}
+          ${lockNote}
+          ${ob.existing?meterRow('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing):''}
+          ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
+          ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),base,ob.nrr):''}
+          ${objectiveRulesHTML(canHaveLogos)}
         </div>`:''}`;
   }else{
     const cs=viewList.filter(c=>c.client===MISCUENTAS_ACCT);
@@ -905,16 +908,20 @@ function renderComercial(o){
   // (es CS puro), no le mostramos ese objetivo ni lo contamos en su cumplimiento
   const canHaveLogos=salesList.length>0;
   const objBlock=frozen?(()=>{
-      const parts=[];
-      if(ob.existing)parts.push(completionPct(rs.existTCV,ob.existing));
-      if(canHaveLogos&&ob.logos)parts.push(completionPct(rs.logoTCV,ob.logos));
-      if(ob.nrr)parts.push(completionPct(realNRRv,ob.nrr));
-      const overall=parts.length?Math.round(parts.reduce((a,p)=>a+p,0)/parts.length):null;
+      // misma lógica que "Inicio" (BONO_CURVES + candados) — un solo cálculo de cumplimiento en toda
+      // la app, no una versión simplificada acá y otra ahí.
+      const lock=incentiveLock(ob,rs.existTCV,realNRRv);
+      const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,realNRRv,canHaveLogos);
+      const overall=liveRaw==null?null:(lock.locked?0:liveRaw);
+      const missing=[];if(!lock.existOk)missing.push('50% en N. ventas existentes');if(!lock.nrrOk)missing.push('75% en NRR');
+      const lockNote=(liveRaw!=null&&lock.locked)?`<div class="pill end-now" style="margin-top:8px;display:inline-block;font-size:11px">🔒 Bloqueado — falta ${missing.join(' y ')} para empezar a cobrar incentivos</div>`:'';
       return `<h3 style="margin-top:20px">🏆 Cumplimiento ${q.label} <span style="color:#888;font-weight:500;text-transform:none">· Q cerrado</span></h3>
         ${overall!=null?`<div style="font-size:34px;font-weight:800;color:${completionColor(overall)};margin:4px 0 10px">${overall}%</div>`:'<div class="muted" style="margin:4px 0 10px">Sin metas cargadas</div>'}
-        ${ob.existing?meterRow('N. ventas existentes',rs.existTCV,ob.existing):''}
+        ${lockNote}
+        ${ob.existing?meterRow('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing):''}
         ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
-        ${ob.nrr?meterRow('NRR · revenue Q',realNRRv,ob.nrr):''}`;
+        ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),realNRRv,ob.nrr):''}
+        ${liveRaw!=null?objectiveRulesHTML(canHaveLogos):''}`;
     })():`<h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
     <table class="objt">
       <tr><th>Objetivo</th><th>Meta</th><th>Proyectado</th><th></th></tr>
@@ -1550,8 +1557,17 @@ function renderConsolidated(){
     ?`<input class="obj-in-co" data-k="${k}" type="number" min="0" step="1000" value="${CONS_OBJECTIVES[k]||''}" placeholder="—">`
     :`<span>${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'<span class="muted">sin meta</span>'}</span>`;
   const semCell=(real,meta)=>!meta?`<td class="sem" style="color:#777">—</td>`:(real>=meta?`<td class="sem" style="color:var(--green-bright)">✓</td>`:`<td class="sem" style="color:#ff8a8d">${fmt(real-meta)}</td>`);
+  // mismo cálculo (BONO_CURVES) que el individual de "Inicio" — sin el candado de incentivos, que es
+  // un concepto de elegibilidad por comercial, no de la empresa.
+  const companyLive=liveObjectivePct(CONS_OBJECTIVES,companySales.existTCV,companySales.logoTCV,companyRevenue,true);
+  const companyHero=companyLive!=null?`<div class="card" style="margin-top:0;padding:34px;text-align:center;border:1px solid ${completionColor(companyLive)};background:linear-gradient(180deg,rgba(255,255,255,.02),transparent)">
+      <div class="muted" style="font-size:12.5px;text-transform:uppercase;letter-spacing:.8px">Cumplimiento del objetivo de la empresa · ${q.label}</div>
+      <div style="font-size:84px;font-weight:800;line-height:1.1;color:${completionColor(companyLive)}">${companyLive}%</div>
+      <div class="gauge" style="margin-top:6px;padding:0;background:transparent"><div class="track"><div class="fill" style="width:${Math.min(100,Math.max(0,companyLive))}%;background:${completionColor(companyLive)}"></div></div></div>
+    </div>`:'';
   let htmlResumen=`<label class="fld" style="margin:20px 0 10px">Objetivo de la empresa · ${q.label}</label>
-    <div class="card" style="padding:16px 18px;margin-top:0">
+    ${companyHero}
+    <div class="card" style="padding:16px 18px;margin-top:${companyHero?'14px':'0'}">
       <table class="objt">
         <tr><th>Objetivo</th><th>Meta</th><th>Real</th><th></th></tr>
         <tr><td>Ventas nuevas · existentes (TCV)</td><td>${coMetaCell('existing')}</td><td class="num">${fmt(companySales.existTCV)}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
@@ -1585,13 +1601,12 @@ function renderConsolidated(){
   // ---- Scoreboard de cumplimiento: solo cuando el Q ya está congelado (fecha límite pasada) ----
   if(isFrozen(q)){
     const scored=rows.map(r=>{
-      const parts=[];
-      if(r.obj.existing)parts.push(completionPct(r.realExistTCV,r.obj.existing));
-      if(r.obj.logos)parts.push(completionPct(r.realLogoTCV,r.obj.logos));
-      if(r.obj.nrr)parts.push(completionPct(r.realNRR,r.obj.nrr));
-      if(!parts.length)return null;
-      const overall=Math.round(parts.reduce((a,p)=>a+p,0)/parts.length);
-      return{...r,overall};
+      const canHaveLogos=r.inSales;
+      const lock=incentiveLock(r.obj,r.realExistTCV,r.realNRR);
+      const liveRaw=liveObjectivePct(r.obj,r.realExistTCV,r.realLogoTCV,r.realNRR,canHaveLogos);
+      if(liveRaw==null)return null;
+      const overall=lock.locked?0:liveRaw;
+      return{...r,overall,lock,canHaveLogos};
     }).filter(Boolean).sort((a,b)=>b.overall-a.overall);
     if(scored.length){
       const teamAvg=Math.round(scored.reduce((a,r)=>a+r.overall,0)/scored.length);
@@ -1602,11 +1617,11 @@ function renderConsolidated(){
         htmlResumen+=`<div class="card score-card" data-o="${r.o}" style="margin-top:0;padding:16px;cursor:pointer">
           <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
             <b style="font-size:13px">#${i+1} ${nm(r.o)}</b>
-            <span style="font-size:20px;font-weight:800;color:${completionColor(r.overall)}">${r.overall}%</span>
+            <span style="font-size:20px;font-weight:800;color:${completionColor(r.overall)}">${r.overall}%${r.lock.locked?' 🔒':''}</span>
           </div>
-          ${r.obj.existing?meterRow('N. existentes',r.realExistTCV,r.obj.existing,true):''}
-          ${r.obj.logos?meterRow('Logos nuevos',r.realLogoTCV,r.obj.logos,true):''}
-          ${r.obj.nrr?meterRow('NRR',r.realNRR,r.obj.nrr,true):''}
+          ${r.obj.existing?meterRow('N. existentes'+(r.lock.existOk?'':' 🔒'),r.realExistTCV,r.obj.existing,true):''}
+          ${r.canHaveLogos&&r.obj.logos?meterRow('Logos nuevos',r.realLogoTCV,r.obj.logos,true):''}
+          ${r.obj.nrr?meterRow('NRR'+(r.lock.nrrOk?'':' 🔒'),r.realNRR,r.obj.nrr,true):''}
         </div>`;});
       htmlResumen+=`</div>`;
     }
