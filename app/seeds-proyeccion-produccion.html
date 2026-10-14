@@ -625,11 +625,53 @@ function personSummary(o){
   return{act,list,salesList,viewList,q,prev,base,curRev,rs,rx,accts};
 }
 // pantalla principal de cada persona: solo lo real, sin nada para cargar (eso vive en "Proyección del Q")
+// curva de "% bono" por tramos de cumplimiento (no lineal, igual a la planilla de incentivos del
+// equipo — Q3 Sales): a cada % de cumplimiento (real/meta) le corresponde el escalón más alto que no
+// lo supera. Pasado el 100% no hay techo: el % bono pasa a ser el % de cumplimiento tal cual.
+const BONO_CURVES={
+  logos:   [[0,0],[50,20],[70,30],[75,40],[80,60],[85,70],[90,80],[95,90],[100,100]],
+  existing:[[0,0],[50,0],[70,0],[75,0],[80,20],[85,40],[90,60],[95,80],[100,100]],
+  nrr:     [[0,0],[50,0],[70,0],[75,0],[80,0],[85,0],[90,33],[95,67],[100,100]],
+};
+function bonoFromCumplimiento(pct,curveKey){
+  if(pct==null)return null;
+  if(pct>100)return pct;
+  const curve=BONO_CURVES[curveKey];
+  let val=curve[0][1];
+  for(const[th,v]of curve){if(pct>=th)val=v;else break;}
+  return val;
+}
+// objetivo en vivo: promedio ponderado del % bono de cada métrica que tenga meta cargada.
+// Vendedores (con cartera de venta propia): 33/33/33 entre logos / existentes / NRR.
+// CS puro (sin cartera de venta propia): 40% ventas existentes / 60% NRR — logos no les aplica.
+function liveObjectivePct(ob,realExistTCV,realLogoTCV,realNRR,canHaveLogos){
+  const parts=[];
+  const cExist=completionPct(realExistTCV,ob.existing);
+  if(cExist!=null)parts.push({bono:bonoFromCumplimiento(cExist,'existing'),weight:canHaveLogos?1:0.4});
+  if(canHaveLogos){
+    const cLogo=completionPct(realLogoTCV,ob.logos);
+    if(cLogo!=null)parts.push({bono:bonoFromCumplimiento(cLogo,'logos'),weight:1});
+  }
+  const cNrr=completionPct(realNRR,ob.nrr);
+  if(cNrr!=null)parts.push({bono:bonoFromCumplimiento(cNrr,'nrr'),weight:canHaveLogos?1:0.6});
+  const totalW=parts.reduce((s,p)=>s+p.weight,0);
+  if(!totalW)return null;
+  return Math.round(parts.reduce((s,p)=>s+p.bono*p.weight,0)/totalW);
+}
 function renderHome(o){
-  const{viewList,q,rs,rx,base}=personSummary(o);
+  const{viewList,salesList,q,rs,rx,base}=personSummary(o);
   const closed=isQuarterClosed(q);
+  const ob=OBJECTIVES[o]||{};
+  const canHaveLogos=salesList.length>0;
+  const live=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,base,canHaveLogos);
+  const heroBlock=live!=null?`<div class="card" style="margin-top:0;padding:26px;text-align:center">
+      <div class="muted" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.6px">Cumplimiento del objetivo · ${q.label}</div>
+      <div style="font-size:62px;font-weight:800;line-height:1.15;color:${completionColor(live)}">${live}%</div>
+      <div class="gauge" style="margin-top:4px;padding:0;background:transparent"><div class="track"><div class="fill" style="width:${Math.min(100,Math.max(0,live))}%;background:${completionColor(live)}"></div></div></div>
+    </div>`:`<div class="section-note" style="margin-top:0">Todavía no tenés objetivo cargado para ${q.label} — lo carga el admin.</div>`;
   const html=`<h2><span class="n">3</span>${o} · ${q.label}</h2>
     <p class="sub">Lo real, tal como lo ve la plataforma. Para cargar tu proyección andá a "Proyección del Q"; para el detalle por cuenta, a "Mis cuentas".</p>
+    ${heroBlock}
     <div class="kpis" style="margin-top:14px">
       ${kpi('Net revenue real '+q.label,fmt(base),closed?'resultado final':'a la fecha, va completándose','flat')}
       ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'existentes + logos, ya facturando','up')}
