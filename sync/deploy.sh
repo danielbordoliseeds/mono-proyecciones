@@ -3,7 +3,7 @@
 #   - SSM SecureString con la clave secreta de Supabase (se crea desde ~/.claude/mono-supabase.env si no existe)
 #   - Role de la Lambda: logs + invocar la data-Lambda del conector + leer ese parámetro
 #   - Lambda proyecciones-sync (Node 22, fuera de la VPC para llegar a Supabase)
-#   - Schedule de EventBridge Scheduler: todos los días 03:00 hora Argentina
+#   - Schedule de EventBridge Scheduler: cada 2 horas, en punto, hora Argentina
 # Uso (Git Bash, con `aws sso login --profile seeds` hecho):
 #   cd sync && MSYS_NO_PATHCONV=1 AWS_PROFILE=seeds bash deploy.sh
 set -euo pipefail
