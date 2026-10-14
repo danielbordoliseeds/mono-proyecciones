@@ -94,6 +94,12 @@ input.prob{width:58px;padding:5px 7px;font-size:12px;text-align:right}
 .objt td.sem{text-align:center;font-weight:700;width:34px}
 .objt input.obj-in{width:86px;padding:5px 7px;font-size:12px;text-align:right;background:#2a2a28;border:1px solid #3a3a38;color:#fff;border-radius:6px}
 .objt input.obj-in:focus{outline:none;border-color:var(--green)}
+/* .objt se diseñó para el sidebar oscuro (.proj-summary) — en una .card blanca (Consolidado) el texto
+   claro (#e8e8e8) y el input sin color propio quedan casi invisibles sobre fondo blanco. */
+.objt-light th{color:var(--g500)}
+.objt-light td{color:var(--ink);border-bottom-color:#eee}
+.objt-light input.obj-in-co{width:110px;padding:5px 7px;font-size:12px;text-align:right;background:#fff;border:1px solid var(--g300);color:var(--ink);border-radius:6px}
+.objt-light input.obj-in-co:focus{outline:none;border-color:var(--green)}
 .ps-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid #2a2a28;font-size:13px}
 .ps-row .l{color:#bdbdbd;font-weight:500}.ps-row .r{font-weight:700;font-variant-numeric:tabular-nums}
 .ps-row.tot{border-bottom:none;border-top:2px solid var(--green);margin-top:8px;padding-top:14px;font-size:15px}
@@ -1556,6 +1562,9 @@ function renderConsolidated(){
   const coMetaCell=(k)=>isAdminCO
     ?`<input class="obj-in-co" data-k="${k}" type="number" min="0" step="1000" value="${CONS_OBJECTIVES[k]||''}" placeholder="—">`
     :`<span>${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'<span class="muted">sin meta</span>'}</span>`;
+  // el objetivo cargado se muestra siempre como texto debajo del Real — así queda visible de una,
+  // sea quien sea que mire, y no depende de leer el valor dentro de un input editable (admin).
+  const realCell=(real,k)=>`<td class="num">${fmt(real)}<div class="muted" style="font-size:10.5px;font-weight:400;margin-top:2px">Objetivo: ${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'sin meta'}</div></td>`;
   const semCell=(real,meta)=>!meta?`<td class="sem" style="color:#777">—</td>`:(real>=meta?`<td class="sem" style="color:var(--green-bright)">✓</td>`:`<td class="sem" style="color:#ff8a8d">${fmt(real-meta)}</td>`);
   // mismo cálculo (BONO_CURVES) que el individual de "Inicio" — sin el candado de incentivos, que es
   // un concepto de elegibilidad por comercial, no de la empresa.
@@ -1568,11 +1577,11 @@ function renderConsolidated(){
   let htmlResumen=`<label class="fld" style="margin:20px 0 10px">Objetivo de la empresa · ${q.label}</label>
     ${companyHero}
     <div class="card" style="padding:16px 18px;margin-top:${companyHero?'14px':'0'}">
-      <table class="objt">
-        <tr><th>Objetivo</th><th>Meta</th><th>Real</th><th></th></tr>
-        <tr><td>Ventas nuevas · existentes (TCV)</td><td>${coMetaCell('existing')}</td><td class="num">${fmt(companySales.existTCV)}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
-        <tr><td>Ventas nuevas · logos (TCV)</td><td>${coMetaCell('logos')}</td><td class="num">${fmt(companySales.logoTCV)}</td>${semCell(companySales.logoTCV,CONS_OBJECTIVES.logos)}</tr>
-        <tr><td>Revenue (NRR, Q)</td><td>${coMetaCell('nrr')}</td><td class="num">${fmt(companyRevenue)}</td>${semCell(companyRevenue,CONS_OBJECTIVES.nrr)}</tr>
+      <table class="objt objt-light">
+        <tr><th>Objetivo</th><th>Real</th><th>Meta ${isAdminCO?'(editar)':''}</th><th></th></tr>
+        <tr><td>Ventas nuevas · existentes (TCV)</td>${realCell(companySales.existTCV,'existing')}<td>${coMetaCell('existing')}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
+        <tr><td>Ventas nuevas · logos (TCV)</td>${realCell(companySales.logoTCV,'logos')}<td>${coMetaCell('logos')}</td>${semCell(companySales.logoTCV,CONS_OBJECTIVES.logos)}</tr>
+        <tr><td>Revenue (NRR, Q)</td>${realCell(companyRevenue,'nrr')}<td>${coMetaCell('nrr')}</td>${semCell(companyRevenue,CONS_OBJECTIVES.nrr)}</tr>
       </table>
       ${isAdminCO?`<div class="row-actions" style="margin-top:10px"><button class="btn ghost" id="btn-co-obj">Guardar objetivo</button><span class="saved-flag" id="co-obj-flag"></span></div>`:''}
     </div>
