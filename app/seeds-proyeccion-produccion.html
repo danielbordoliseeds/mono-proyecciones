@@ -48,15 +48,28 @@ label.fld{font-size:11.5px;font-weight:600;color:var(--g700);display:block;margi
 select,input[type=number],input[type=text]{width:100%;font-family:var(--font);font-size:14px;padding:10px 12px;border:1px solid var(--g300);border-radius:var(--r-sm);background:#fff;font-weight:500}
 select:focus,input:focus{outline:none;border-color:var(--green)}
 .input-mini{display:flex;align-items:center;gap:8px}.input-mini span{font-size:13px;font-weight:700;color:var(--g500)}
-/* comercial tabs */
-.ctabs{display:flex;gap:7px;flex-wrap:wrap;margin-top:16px}
-.ctab{font-size:13px;font-weight:600;padding:9px 15px;border-radius:999px;cursor:pointer;background:#fff;border:1px solid var(--g300);color:var(--g700);transition:.12s;display:flex;align-items:center;gap:7px}
-.ctab:hover{border-color:var(--green)}
-.ctab.active{background:var(--ink);color:#fff;border-color:var(--ink)}
-.ctab.cons.active{background:var(--green);border-color:var(--green)}
-.ctab .badge{font-size:10px;font-weight:700;background:var(--g100);color:var(--g700);padding:1px 7px;border-radius:999px}
-.ctab.active .badge{background:rgba(255,255,255,.2);color:#fff}
-.ctab.warn{border-color:var(--amber);color:#A8780C}
+/* layout de dos columnas: menú de navegación fijo a la izquierda + contenido a la derecha —
+   así no hay que bajar toda la página para saltar a otra persona o sección */
+.app-body{display:flex;align-items:flex-start;gap:20px}
+.sidebar{width:230px;flex:0 0 230px;position:sticky;top:16px;max-height:calc(100vh - 32px);overflow-y:auto;padding:16px 14px}
+.main-col{flex:1;min-width:0}
+@media(max-width:900px){.app-body{display:block}.sidebar{position:static;width:100%;max-height:none;margin-bottom:16px}}
+.side-group{margin-bottom:4px}
+.side-quick{font-size:13px;font-weight:600;padding:9px 10px;border-radius:var(--r-sm);cursor:pointer;color:var(--g700);display:flex;align-items:center;gap:8px}
+.side-quick:hover{background:var(--g100)}
+.side-item{font-size:13px;font-weight:600;padding:9px 10px;border-radius:var(--r-sm);cursor:pointer;background:transparent;color:var(--g700);transition:.12s;display:flex;align-items:center;justify-content:space-between;gap:7px}
+.side-item:hover{background:var(--g100)}
+.side-item.active{background:var(--ink);color:#fff}
+.side-item.cons.active{background:var(--green)}
+.side-item .badge{font-size:10px;font-weight:700;background:var(--g100);color:var(--g700);padding:1px 7px;border-radius:999px}
+.side-item.active .badge{background:rgba(255,255,255,.2);color:#fff}
+.side-item.warn{color:#A8780C}
+.side-sub{margin:2px 0 8px 10px;padding-left:10px;border-left:2px solid var(--g300)}
+.side-sub-item{font-size:12.5px;font-weight:600;padding:7px 10px;border-radius:var(--r-sm);cursor:pointer;color:var(--g700)}
+.side-sub-item:hover{background:var(--g100)}
+.side-sub-item.active{background:var(--green);color:#fff}
+.side-sub-item.disabled{opacity:.45;cursor:default}
+.side-sub-item.disabled:hover{background:transparent}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:4px}
 .kpi{background:var(--g100);border-radius:var(--r-md);padding:15px 16px;border-left:3px solid var(--green)}
 .kpi .k{font-size:11px;color:var(--g500);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px}
@@ -76,14 +89,6 @@ input.prob{width:58px;padding:5px 7px;font-size:12px;text-align:right}
 .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
 .tab{font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:999px;cursor:pointer;background:var(--g100);color:var(--g700)}
 .tab.active{background:var(--ink);color:#fff}
-/* navegación principal (secciones de una persona, o del Consolidado) — más grande y marcada que .tab,
-   para que se note que es la navegación de primer nivel y no una sub-pestaña de contenido */
-.section-nav{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0;padding:14px 16px;background:var(--g100);border-radius:var(--r-lg)}
-.sec-tab{font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px;cursor:pointer;background:#fff;border:2px solid var(--g300);color:var(--g700);transition:.12s;display:flex;align-items:center;gap:8px}
-.sec-tab:hover{border-color:var(--green)}
-.sec-tab.active{background:var(--green);border-color:var(--green);color:#fff}
-.sec-tab.disabled{opacity:.45;cursor:default}
-.sec-tab.disabled:hover{border-color:var(--g300)}
 .proj-grid{display:grid;grid-template-columns:1fr 320px;gap:18px;margin-top:6px}
 .proj-summary{background:var(--ink);color:#fff;border-radius:var(--r-lg);padding:22px;position:sticky;top:16px;align-self:start}
 .proj-summary h3{font-size:13px;font-weight:700;color:var(--green-bright);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
@@ -208,44 +213,51 @@ details.howto b{color:var(--ink)}
     <div class="userchip" id="userchip"></div>
   </header>
 
-  <!-- 1. CARGA -->
-  <div class="card">
-    <h2><span class="n">1</span>Revenue</h2>
-    <p class="sub">Se sincroniza solo con la plataforma cada 2 horas (contratos firmados, ganancia mensual en USD). Ya no hace falta cargar el export de Power BI. Solo se consideran cuentas que facturan en el trimestre base.</p>
-    <div class="loaded" id="loaded">✓ <span id="loaded-txt"></span></div>
-    <div class="kpis hidden" id="revenue-kpis" style="margin-top:14px"></div>
-  </div>
-
-  <!-- 2. CONFIG -->
-  <div class="card hidden" id="ctrl-card">
-    <h2><span class="n">2</span>Configuración global</h2>
-    <p class="sub">El trimestre y la meta aplican a todas las pestañas.</p>
-    <div class="controls">
-      <div><label class="fld">Trimestre a proyectar</label><select id="sel-q"></select></div>
-      <div id="admin-config" class="hidden" style="display:contents">
-      <div><label class="fld">Meta de crecimiento vs Q anterior</label><div class="input-mini"><input type="number" id="growth" value="15" min="0" max="100" step="1"><span>%</span></div></div>
-      <div><label class="fld">Baja anticipada (prom. año)</label><div class="input-mini"><input type="number" id="churnpct" value="1.7" min="0" max="100" step="0.1"><span>%</span></div></div>
+  <div class="app-body">
+    <!-- MENÚ: todas las secciones a mano, sin tener que bajar para encontrarlas -->
+    <nav class="card hidden sidebar" id="sidebar">
+      <div class="side-group">
+        <div class="side-quick" data-jump="revenue-card">📈 Revenue</div>
+        <div class="side-quick" data-jump="ctrl-card">⚙️ Configuración global</div>
       </div>
-      <div id="deadline-ctrl" class="hidden"><label class="fld">Fecha límite de este Q (congela la proyección)</label>
-        <div class="input-mini"><input type="date" id="deadline-date"><button class="btn ghost sm" id="deadline-save" style="margin-left:6px">Guardar</button><button class="btn ghost sm" id="deadline-clear" style="margin-left:4px">Quitar</button></div>
-        <span class="muted" id="deadline-flag" style="font-size:11.5px"></span>
+      <label class="fld" style="margin:14px 0 6px">A quién ver</label>
+      <div id="sidebar-tabs"></div>
+    </nav>
+
+    <main class="main-col">
+      <!-- 1. CARGA -->
+      <div class="card" id="revenue-card">
+        <h2><span class="n">1</span>Revenue</h2>
+        <p class="sub">Se sincroniza solo con la plataforma cada 2 horas (contratos firmados, ganancia mensual en USD). Ya no hace falta cargar el export de Power BI. Solo se consideran cuentas que facturan en el trimestre base.</p>
+        <div class="loaded" id="loaded">✓ <span id="loaded-txt"></span></div>
+        <div class="kpis hidden" id="revenue-kpis" style="margin-top:14px"></div>
       </div>
-    </div>
-    <div style="margin-top:18px;border-top:1px dashed var(--g300);padding-top:16px">
-      <label class="fld">Pipeline de HubSpot</label>
-      <div class="loaded" id="loaded2" style="margin-top:4px">✓ <span id="loaded2-txt"></span></div>
-    </div>
-  </div>
 
-  <!-- 3. NAVEGACIÓN: a quién ver, y dentro de esa persona, qué ver -->
-  <div class="card hidden" id="nav-card">
-    <label class="fld" style="margin-bottom:8px">A quién ver</label>
-    <div class="ctabs" id="ctabs"></div>
-    <div class="section-nav hidden" id="section-nav"></div>
-  </div>
+      <!-- 2. CONFIG -->
+      <div class="card hidden" id="ctrl-card">
+        <h2><span class="n">2</span>Configuración global</h2>
+        <p class="sub">El trimestre y la meta aplican a todas las pestañas.</p>
+        <div class="controls">
+          <div><label class="fld">Trimestre a proyectar</label><select id="sel-q"></select></div>
+          <div id="admin-config" class="hidden" style="display:contents">
+          <div><label class="fld">Meta de crecimiento vs Q anterior</label><div class="input-mini"><input type="number" id="growth" value="15" min="0" max="100" step="1"><span>%</span></div></div>
+          <div><label class="fld">Baja anticipada (prom. año)</label><div class="input-mini"><input type="number" id="churnpct" value="1.7" min="0" max="100" step="0.1"><span>%</span></div></div>
+          </div>
+          <div id="deadline-ctrl" class="hidden"><label class="fld">Fecha límite de este Q (congela la proyección)</label>
+            <div class="input-mini"><input type="date" id="deadline-date"><button class="btn ghost sm" id="deadline-save" style="margin-left:6px">Guardar</button><button class="btn ghost sm" id="deadline-clear" style="margin-left:4px">Quitar</button></div>
+            <span class="muted" id="deadline-flag" style="font-size:11.5px"></span>
+          </div>
+        </div>
+        <div style="margin-top:18px;border-top:1px dashed var(--g300);padding-top:16px">
+          <label class="fld">Pipeline de HubSpot</label>
+          <div class="loaded" id="loaded2" style="margin-top:4px">✓ <span id="loaded2-txt"></span></div>
+        </div>
+      </div>
 
-  <!-- 4. PANEL COMERCIAL -->
-  <div class="card hidden" id="panel"></div>
+      <!-- 3. PANEL COMERCIAL -->
+      <div class="card hidden" id="panel"></div>
+    </main>
+  </div>
 
   <p class="foot">Seeds · Motor de Proyección v2 — owners cruzados con HubSpot al 25/06/2026. Mapeo editable en el bloque OWNERS del código.</p>
 </div>
@@ -268,6 +280,9 @@ let MISCUENTAS_GRAN='year'; // granularidad del filtro de tiempo del Resumen de 
 let MISCUENTAS_PERIOD_IDX=null; // qué período puntual de esa granularidad (null = el más reciente)
 let CONS_TAB='resumen'; // pestaña activa dentro del Consolidado
 let CO_EDITING=false; // true mientras el admin está editando el objetivo de la empresa (si no, meta fija)
+// etiquetas de las sub-pestañas — una sola fuente de verdad para el menú de la izquierda y el contenido
+const CONS_TAB_LABELS={resumen:'📊 Resumen',ventas:'💼 Equipo de Ventas',cs:'🤝 Equipo de CS',duplas:'🔗 Cuentas y duplas',brief:'🎯 Brief Talent Acquisition'};
+const PERSON_TABS_META=[{id:'home',label:'🏠 Inicio'},{id:'cuentas',label:'📒 Mis cuentas'},{id:'q',label:'🗓️ Proyección del Q'},{id:'semanal',label:'📅 Proyección semanal',disabled:true}];
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
 const OWNERS={
@@ -492,7 +507,9 @@ function personLabel(c){return c.person+(c.role?' · '+c.role:'');}
 // ===== INIT / TABS =====
 function init(){
   buildDupla();
-  $('#ctrl-card').classList.remove('hidden');$('#nav-card').classList.remove('hidden');$('#panel').classList.remove('hidden');
+  $('#ctrl-card').classList.remove('hidden');$('#sidebar').classList.remove('hidden');$('#panel').classList.remove('hidden');
+  $$('.side-quick[data-jump]').forEach(el=>el.onclick=()=>{
+    const t=$('#'+el.dataset.jump);if(t)t.scrollIntoView({behavior:'smooth',block:'start'});});
   const qsel=$('#sel-q');qsel.innerHTML='';
   QUARTERS.forEach((q,i)=>{if(i===0)return;qsel.add(new Option(q.label,q.id));});
   // por defecto, el trimestre a proyectar: el en curso, o el siguiente si ya estamos en su último mes
@@ -563,15 +580,37 @@ function setupDeadlineCtrl(){
     const err=typeof window.saveDeadline==='function'?await window.saveDeadline(q.id,null):'No disponible.';
     if(flag)flag.textContent=err||'Fecha límite quitada';refreshDeadlineCtrl();render();};
 }
+// baja la página hasta el panel de contenido, para que elegir algo en el menú de la izquierda
+// "lleve" a lo elegido en vez de solo cambiarlo mientras se sigue viendo otra parte de la pantalla
+function scrollToPanel(){const p=$('#panel');if(p)p.scrollIntoView({behavior:'smooth',block:'start'});}
 function buildTabs(){
-  const act=activeAccounts();const ct=$('#ctabs');ct.innerHTML='';
+  const act=activeAccounts();const ct=$('#sidebar-tabs');if(!ct)return;ct.innerHTML='';
   const role=(CURRENT_USER&&CURRENT_USER.role)||'admin';
   const canSeeAll=true; // el Consolidado lo puede ver cualquier persona logueada
   const mine=CURRENT_USER&&CURRENT_USER.comercial_name;
   const q=projQ(),prev=baseQ();
+  const buildSubs=(items,activeId,onPick)=>{
+    const wrap=document.createElement('div');wrap.className='side-sub';
+    items.forEach(it=>{
+      const el=document.createElement('div');
+      el.className='side-sub-item'+(activeId===it.id?' active':'')+(it.disabled?' disabled':'');
+      el.textContent=it.label;
+      if(it.disabled)el.title='Próximamente';
+      else el.onclick=(e)=>{e.stopPropagation();onPick(it.id);};
+      wrap.appendChild(el);
+    });
+    return wrap;
+  };
   // consolidated (admin y talent)
-  if(canSeeAll){const cons=document.createElement('div');cons.className='ctab cons'+(ACTIVE==='__cons__'?' active':'');
-    cons.innerHTML=`Consolidado <span class="badge">${act.size}</span>`;cons.onclick=()=>{ACTIVE='__cons__';render();};ct.appendChild(cons);}
+  if(canSeeAll){
+    const cons=document.createElement('div');cons.className='side-item cons'+(ACTIVE==='__cons__'?' active':'');
+    cons.innerHTML=`<span>Consolidado</span><span class="badge">${act.size}</span>`;
+    cons.onclick=()=>{ACTIVE='__cons__';render();scrollToPanel();};ct.appendChild(cons);
+    if(ACTIVE==='__cons__'){
+      const consTabsMeta=Object.entries(CONS_TAB_LABELS).map(([id,label])=>({id,label}));
+      ct.appendChild(buildSubs(consTabsMeta,CONS_TAB,id=>{CONS_TAB=id;render();scrollToPanel();}));
+    }
+  }
   const order=[...people(),'Sin asignar'];
   order.forEach(o=>{
     if(role==='talent')return;                 // talent: solo consolidado (lectura)
@@ -590,9 +629,12 @@ function buildTabs(){
     }
     if(!hasWork && o!==mine && !hasProj)return;
     const t=document.createElement('div');
-    t.className='ctab'+(ACTIVE===o?' active':'')+(o==='Sin asignar'?' warn':'');
-    t.innerHTML=`${o.replace(' (Mono)','')} <span class="badge">${accts.size}</span>`;
-    t.onclick=()=>{ACTIVE=o;ACCT_FILTER='';render();};ct.appendChild(t);
+    t.className='side-item'+(ACTIVE===o?' active':'')+(o==='Sin asignar'?' warn':'');
+    t.innerHTML=`<span>${o.replace(' (Mono)','')}</span><span class="badge">${accts.size}</span>`;
+    t.onclick=()=>{ACTIVE=o;ACCT_FILTER='';render();scrollToPanel();};ct.appendChild(t);
+    if(ACTIVE===o){
+      ct.appendChild(buildSubs(PERSON_TABS_META,PERSON_SECTION,id=>{PERSON_SECTION=id;render();scrollToPanel();}));
+    }
   });
 }
 
@@ -614,21 +656,8 @@ function churnLost(o){
 }
 function render(){
   if(!CONTRACTS.length)return;
-  buildTabs();
-  const sn=$('#section-nav');
-  if(ACTIVE==='__cons__'){
-    if(sn)sn.classList.add('hidden');
-    renderConsolidated();
-    return;
-  }
-  if(sn){
-    sn.classList.remove('hidden');
-    const sec=(s,label)=>`<div class="sec-tab${PERSON_SECTION===s?' active':''}" data-sec="${s}">${label}</div>`;
-    sn.innerHTML=sec('home','🏠 Inicio')+sec('cuentas','📒 Mis cuentas')+sec('q','🗓️ Proyección del Q')
-      +`<div class="sec-tab disabled" data-sec="semanal" title="Próximamente">📅 Proyección semanal</div>`;
-    $$('#section-nav .sec-tab[data-sec]').forEach(t=>t.onclick=()=>{
-      const s=t.dataset.sec;if(s==='semanal')return;PERSON_SECTION=s;render();});
-  }
+  buildTabs(); // también arma, bajo la persona/Consolidado activo, las sub-pestañas del menú
+  if(ACTIVE==='__cons__'){renderConsolidated();return;}
   if(PERSON_SECTION==='cuentas')renderMisCuentas(ACTIVE);
   else if(PERSON_SECTION==='q')renderComercial(ACTIVE);
   else renderHome(ACTIVE);
@@ -1774,19 +1803,17 @@ function renderConsolidated(){
       htmlBrief+='</tbody></table></details>';});
   }
   else htmlBrief+='<div class="empty">Todavía no hay logos nuevos proyectados. Aparecen acá cuando un comercial proyecta una cuenta nueva.</div>';
-  // ---- ensamblado: navegación por pestañas en vez de una sola pantalla larga ----
+  // ---- ensamblado: la navegación entre sub-pestañas vive en el menú de la izquierda (sidebar) ----
   const consTabs=[
-    {id:'resumen',label:'📊 Resumen',body:htmlResumen},
-    {id:'ventas',label:'💼 Equipo de Ventas',body:htmlVentas},
-    {id:'cs',label:'🤝 Equipo de CS',body:htmlCS},
-    {id:'duplas',label:'🔗 Cuentas y duplas',body:htmlDuplas},
-    {id:'brief',label:'🎯 Brief Talent Acquisition',body:htmlBrief},
+    {id:'resumen',label:CONS_TAB_LABELS.resumen,body:htmlResumen},
+    {id:'ventas',label:CONS_TAB_LABELS.ventas,body:htmlVentas},
+    {id:'cs',label:CONS_TAB_LABELS.cs,body:htmlCS},
+    {id:'duplas',label:CONS_TAB_LABELS.duplas,body:htmlDuplas},
+    {id:'brief',label:CONS_TAB_LABELS.brief,body:htmlBrief},
   ];
   if(!consTabs.find(t=>t.id===CONS_TAB))CONS_TAB='resumen';
-  const navHtml=`<div class="section-nav">${consTabs.map(t=>`<div class="sec-tab${CONS_TAB===t.id?' active':''}" data-tab="${t.id}">${t.label}</div>`).join('')}</div>`;
   const active=consTabs.find(t=>t.id===CONS_TAB);
-  $('#panel').innerHTML=header+navHtml+`<label class="fld" style="margin:18px 0 10px">${active.label}</label>`+active.body;
-  $$('#panel .sec-tab[data-tab]').forEach(t=>t.onclick=()=>{CONS_TAB=t.dataset.tab;render();});
+  $('#panel').innerHTML=header+`<label class="fld" style="margin:18px 0 10px">${active.label}</label>`+active.body;
   const by={};all.forEach(c=>{const v=q.idx.reduce((a,i)=>a+c.series[i],0);by[c.client]=(by[c.client]||0)+v;});
   const arr=Object.entries(by).sort((a,b)=>b[1]-a[1]).slice(0,9);const mx=arr.length?arr[0][1]:1;
   const cb=$('#cons-bars');if(cb)cb.innerHTML=arr.map(([n,v])=>`<div class="bar-row"><div class="nm" title="${n}">${n}</div><div class="track"><div class="fill" style="width:${v/mx*100}%"></div></div><div class="val">${fmt(v)}</div></div>`).join('');
