@@ -267,6 +267,7 @@ let MISCUENTAS_ACCT=''; // cuenta elegida dentro de "Mis cuentas" ('' = Resumen)
 let MISCUENTAS_GRAN='year'; // granularidad del filtro de tiempo del Resumen de "Mis cuentas"
 let MISCUENTAS_PERIOD_IDX=null; // qué período puntual de esa granularidad (null = el más reciente)
 let CONS_TAB='resumen'; // pestaña activa dentro del Consolidado
+let CO_EDITING=false; // true mientras el admin está editando el objetivo de la empresa (si no, meta fija)
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
 const OWNERS={
@@ -1536,6 +1537,10 @@ function renderConsolidated(){
   order.forEach(o=>{const list=contractsFor(o,act);const sList=salesContractsFor(o,act);const stO=getState(o);
     const hasNew=!!(stO.newLines&&stO.newLines.length);
     if(!list.length && !sList.length && !hasNew)return;
+    // cartera combinada (retención + venta, sin duplicar) — igual criterio que personSummary/renderComercial:
+    // el NRR de un vendedor cuenta también lo que vende aunque la retención de esa cuenta sea de otra
+    // persona, si no, el scoreboard le muestra 0% de NRR aunque en su propia "Inicio" sí le aparezca.
+    const seenCk=new Set();const viewList=[...list,...sList].filter(c=>{const k=ckey(c);if(seenCk.has(k))return false;seenCk.add(k);return true;});
     const b=sumQ(list,q);const cur=sumQ(list,prev||q);
     const ending=endingCandidates(list,q,prev);
     const save=window.__ctx;window.__ctx={o,q,ending,list};const ext=extExpected(o);const chn=totalChurn(o,b);window.__ctx=save;
@@ -1550,7 +1555,7 @@ function renderConsolidated(){
     rows.push({o,inSales:sList.length>0,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
       cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
-      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExistTCV:rs.existTCV,realLogoTCV:rs.logoTCV,realExt:rx,realNRR:sumQ(list,q),
+      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExistTCV:rs.existTCV,realLogoTCV:rs.logoTCV,realExt:rx,realNRR:sumQ(viewList,q),
       nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
   const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
@@ -1580,7 +1585,9 @@ function renderConsolidated(){
   // no el filtrado/por-granularidad de los gráficos de abajo) — para el click en el TCV de existentes/logos
   const companySalesDetail=newSalesBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
   const isAdminCO=!CURRENT_USER||CURRENT_USER.role==='admin';
-  const coMetaCell=(k)=>isAdminCO
+  // el objetivo queda fijo (texto, no input) una vez guardado — "Editar objetivo" lo abre a edición
+  // a propósito, así no es un casillero siempre tocable por accidente.
+  const coMetaCell=(k)=>(isAdminCO&&CO_EDITING)
     ?`<input class="obj-in-co" data-k="${k}" type="number" min="0" step="1000" value="${CONS_OBJECTIVES[k]||''}" placeholder="—">`
     :`<span>${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'<span class="muted">sin meta</span>'}</span>`;
   const detailTableHTML=rows=>rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th class="num">TCV</th></tr></thead><tbody>
@@ -1599,7 +1606,7 @@ function renderConsolidated(){
   let htmlResumen=`<label class="fld" style="margin:20px 0 10px">Objetivo de la empresa · ${q.label}</label>
     <div class="card" style="padding:16px 18px;margin-top:0">
       <table class="objt objt-light">
-        <tr><th>Objetivo</th><th>Real</th><th>Meta ${isAdminCO?'(editar)':''}</th><th></th></tr>
+        <tr><th>Objetivo</th><th>Real</th><th>Meta</th><th></th></tr>
         <tr><td>Ventas nuevas · existentes (TCV)</td>${realCell(companySales.existTCV,'existing','Existente')}<td>${coMetaCell('existing')}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
         ${detailRow('Existente',4)}
         <tr><td>Ventas nuevas · logos (TCV)</td>${realCell(companySales.logoTCV,'logos','Logo nuevo')}<td>${coMetaCell('logos')}</td>${semCell(companySales.logoTCV,CONS_OBJECTIVES.logos)}</tr>
@@ -1607,7 +1614,10 @@ function renderConsolidated(){
         <tr><td>Revenue (NRR, Q)</td>${realCell(companyRevenue,'nrr')}<td>${coMetaCell('nrr')}</td>${semCell(companyRevenue,CONS_OBJECTIVES.nrr)}</tr>
       </table>
       <div class="muted" style="font-size:10.5px;margin-top:6px">Click en un monto de Real (existentes/logos) para ver el detalle de cuentas.</div>
-      ${isAdminCO?`<div class="row-actions" style="margin-top:10px"><button class="btn ghost" id="btn-co-obj">Guardar objetivo</button><span class="saved-flag" id="co-obj-flag"></span></div>`:''}
+      ${isAdminCO?(CO_EDITING
+        ?`<div class="row-actions" style="margin-top:10px"><button class="btn ghost" id="btn-co-obj">Guardar objetivo</button><button class="btn ghost" id="btn-co-cancel">Cancelar</button><span class="saved-flag" id="co-obj-flag"></span></div>`
+        :`<div class="row-actions" style="margin-top:10px"><button class="btn ghost" id="btn-co-edit">Editar objetivo</button><span class="saved-flag" id="co-obj-flag"></span></div>`
+      ):''}
     </div>
     <label class="fld" style="margin:20px 0 4px">Gráficos</label>
     ${consFilterBar()}
@@ -1786,10 +1796,14 @@ function renderConsolidated(){
   const cfa=$('#cf-acct');if(cfa)cfa.onchange=e=>{CONS_FILTER.account=e.target.value;render();};
   const cfv=$('#cf-vend');if(cfv)cfv.onchange=e=>{CONS_FILTER.vendedor=e.target.value;render();};
   const cfc=$('#cf-cs');if(cfc)cfc.onchange=e=>{CONS_FILTER.cs=e.target.value;render();};
+  const btnCOEdit=$('#btn-co-edit');if(btnCOEdit)btnCOEdit.onclick=()=>{CO_EDITING=true;render();};
+  const btnCOCancel=$('#btn-co-cancel');if(btnCOCancel)btnCOCancel.onclick=()=>{CO_EDITING=false;render();};
   const btnCO=$('#btn-co-obj');if(btnCO)btnCO.onclick=async()=>{
     const vals={existing:0,logos:0,nrr:0};$$('#panel .obj-in-co').forEach(inp=>vals[inp.dataset.k]=parseFloat(inp.value)||0);
     const flag=$('#co-obj-flag');if(flag)flag.textContent='Guardando…';
     const res=typeof saveConsObjectives==='function'?await saveConsObjectives(vals):{ok:false,text:'No disponible.'};
+    // solo vuelve a modo fijo si guardó bien — si hubo error, se queda editando para poder corregir
+    if(res.ok)CO_EDITING=false;
     render();
     // el render de arriba reconstruyó el panel entero: el flag de "Guardando…" ya no existe,
     // hay que escribir el resultado en el que lo reemplazó, y recién ahí programar que se borre
