@@ -525,9 +525,14 @@ function refreshRevenueCard(){
   const prev=baseQ();const act=activeAccounts();const all=contractsFor('__cons__',act);
   const rs=realSales(all,q);const rx=realExtensions(all,q,prev);const closed=isQuarterClosed(q);
   el.classList.remove('hidden');
+  // objetivo de la empresa (CONS_OBJECTIVES), debajo de cada KPI que tenga una meta equivalente —
+  // % crudo real/meta, igual criterio que el resto de los medidores por métrica (no el ponderado de
+  // BONO_CURVES, que es para el cumplimiento total, no para una sola métrica suelta)
+  const realNRR=sumQ(all,q),nrrObj=CONS_OBJECTIVES.nrr,salesObj=(CONS_OBJECTIVES.existing||0)+(CONS_OBJECTIVES.logos||0);
+  const objLine=(real,meta)=>{const p=completionPct(real,meta);return p==null?'':`Objetivo: ${fmt(meta)} · <b style="color:${completionColor(p)}">${p}% cumplido</b>`;};
   el.innerHTML=`
-    ${kpi('Net revenue real '+q.label,fmt(sumQ(all,q)),closed?'resultado final':'a la fecha · se va completando solo','flat')}
-    ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'existentes + logos, ya facturando','up')}
+    ${kpi('Net revenue real '+q.label,fmt(realNRR),closed?'resultado final':'a la fecha · se va completando solo','flat',objLine(realNRR,nrrObj))}
+    ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'existentes + logos, ya facturando','up',objLine(rs.totalTCV,salesObj))}
     ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
     ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}`;
 }
@@ -1765,14 +1770,20 @@ function renderConsolidated(){
   const btnCO=$('#btn-co-obj');if(btnCO)btnCO.onclick=async()=>{
     const vals={existing:0,logos:0,nrr:0};$$('#panel .obj-in-co').forEach(inp=>vals[inp.dataset.k]=parseFloat(inp.value)||0);
     const flag=$('#co-obj-flag');if(flag)flag.textContent='Guardando…';
-    if(typeof saveConsObjectives==='function')await saveConsObjectives(vals,flag);else if(flag)flag.textContent='';
-    render();};
+    const res=typeof saveConsObjectives==='function'?await saveConsObjectives(vals):{ok:false,text:'No disponible.'};
+    render();
+    // el render de arriba reconstruyó el panel entero: el flag de "Guardando…" ya no existe,
+    // hay que escribir el resultado en el que lo reemplazó, y recién ahí programar que se borre
+    const flag2=$('#co-obj-flag');
+    if(flag2){flag2.textContent=res.text;flag2.style.color=res.ok?'var(--green)':'#d33';
+      if(res.ok)setTimeout(()=>{if(flag2)flag2.textContent='';},4000);}
+  };
   $$('#panel .score-card').forEach(card=>card.onclick=()=>{ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
 }
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
 
 // ===== UI bits =====
-function kpi(k,v,d,cls){return `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="d ${cls}">${d}</div></div>`;}
+function kpi(k,v,d,cls,obj){return `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="d ${cls}">${d}</div>${obj?`<div class="d" style="color:var(--g500);font-weight:500">${obj}</div>`:''}</div>`;}
 function pct(a,b){if(!b)return '';const p=(a/b-1)*100;return (p>=0?'+':'')+p.toFixed(1)+'% vs base';}
 // contraste real/proyectado vs meta: usado tanto para meta vs proyectado (Consolidado) como para
 // proyectado vs real (bloque "Real de la plataforma") — mismo lenguaje visual (✓ o lo que falta).
@@ -2125,13 +2136,15 @@ drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])readFile(e.dataTrans
     if(error||!data)return;
     CONS_OBJECTIVES={existing:+data.target_existing||0,logos:+data.target_logos||0,nrr:+data.target_nrr||0};
   };
-  window.saveConsObjectives=async function(vals,flagEl){
-    if(!SB||!CURRENT_USER||CURRENT_USER.role!=='admin'){if(flagEl)flagEl.textContent='Iniciá sesión como admin.';return;}
+  // devuelve {ok,text} en vez de escribir directo en el flag: el render() que sigue al guardado
+  // reemplaza el panel entero (y con él, el <span> del flag) — si se escribe ahí antes de ese render,
+  // el mensaje desaparece al instante y encima errores y éxitos se veían igual (siempre verdes).
+  window.saveConsObjectives=async function(vals){
+    if(!SB||!CURRENT_USER||CURRENT_USER.role!=='admin')return{ok:false,text:'Iniciá sesión como admin.'};
     const row={quarter:projQ().id,target_existing:vals.existing||0,target_logos:vals.logos||0,target_nrr:vals.nrr||0,updated_by:CURRENT_USER.id,updated_at:new Date().toISOString()};
     const{error}=await SB.from('consolidado_objectives').upsert(row,{onConflict:'quarter'});
     if(!error)CONS_OBJECTIVES={existing:row.target_existing,logos:row.target_logos,nrr:row.target_nrr};
-    if(flagEl)flagEl.textContent=error?('Error: '+error.message+' — ¿corriste db/schema_consolidado_objetivos.sql en Supabase?'):'✓ Objetivo guardado';
-    if(flagEl&&!error)setTimeout(()=>{flagEl.textContent='';},4000);
+    return error?{ok:false,text:'Error: '+error.message+' — ¿corriste db/schema_consolidado_objetivos.sql en Supabase?'}:{ok:true,text:'✓ Objetivo guardado'};
   };
   window.loadDeadlines=async function(){
     if(!SB||!CURRENT_USER)return;
