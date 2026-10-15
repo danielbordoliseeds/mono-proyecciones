@@ -1563,13 +1563,25 @@ function renderConsolidated(){
   // siempre, tal como los gráficos de abajo. Lo real se compara siempre contra el Q que se mira arriba.
   const companySales=newSalesSeries(CONTRACTS,[{label:q.label,idx:q.idx}])[0]||{existTCV:0,logoTCV:0};
   const companyRevenue=sumQ(CONTRACTS,q);
+  // detalle de qué cuentas arrancaron a facturar ese Q (CONTRACTS directo, igual criterio que companySales,
+  // no el filtrado/por-granularidad de los gráficos de abajo) — para el click en el TCV de existentes/logos
+  const companySalesDetail=newSalesBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
   const isAdminCO=!CURRENT_USER||CURRENT_USER.role==='admin';
   const coMetaCell=(k)=>isAdminCO
     ?`<input class="obj-in-co" data-k="${k}" type="number" min="0" step="1000" value="${CONS_OBJECTIVES[k]||''}" placeholder="—">`
     :`<span>${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'<span class="muted">sin meta</span>'}</span>`;
+  const detailTableHTML=rows=>rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th class="num">TCV</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
+    </tbody></table>`:'<p class="muted" style="margin:0">Sin ventas de este tipo en el Q.</p>';
   // el objetivo cargado se muestra siempre como texto debajo del Real — así queda visible de una,
-  // sea quien sea que mire, y no depende de leer el valor dentro de un input editable (admin).
-  const realCell=(real,k)=>`<td class="num">${fmt(real)}<div class="muted" style="font-size:10.5px;font-weight:400;margin-top:2px">Objetivo: ${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'sin meta'}</div></td>`;
+  // sea quien sea que mire, y no depende de leer el valor dentro de un input editable (admin). Si hay
+  // tipo (existentes/logos), el Real es clickeable y despliega el detalle de cuentas de ese Q.
+  const realCell=(real,k,tipo)=>{
+    const objCaption=`<div class="muted" style="font-size:10.5px;font-weight:400;margin-top:2px">Objetivo: ${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'sin meta'}</div>`;
+    const valueHTML=tipo?`<span class="co-tcv-toggle" data-type="${tipo}" style="cursor:pointer;text-decoration:underline dotted #bbb" title="Ver detalle">${fmt(real)}</span>`:fmt(real);
+    return `<td class="num">${valueHTML}${objCaption}</td>`;
+  };
+  const detailRow=(tipo,colspan)=>`<tr class="co-detail-row hidden" data-type="${tipo}"><td colspan="${colspan}" style="padding:4px 4px 14px">${detailTableHTML(companySalesDetail.filter(r=>r.tipo===tipo))}</td></tr>`;
   const semCell=(real,meta)=>!meta?`<td class="sem" style="color:#777">—</td>`:(real>=meta?`<td class="sem" style="color:var(--green-bright)">✓</td>`:`<td class="sem" style="color:#ff8a8d">${fmt(real-meta)}</td>`);
   // mismo cálculo (BONO_CURVES) que el individual de "Inicio" — sin el candado de incentivos, que es
   // un concepto de elegibilidad por comercial, no de la empresa.
@@ -1584,10 +1596,13 @@ function renderConsolidated(){
     <div class="card" style="padding:16px 18px;margin-top:${companyHero?'14px':'0'}">
       <table class="objt objt-light">
         <tr><th>Objetivo</th><th>Real</th><th>Meta ${isAdminCO?'(editar)':''}</th><th></th></tr>
-        <tr><td>Ventas nuevas · existentes (TCV)</td>${realCell(companySales.existTCV,'existing')}<td>${coMetaCell('existing')}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
-        <tr><td>Ventas nuevas · logos (TCV)</td>${realCell(companySales.logoTCV,'logos')}<td>${coMetaCell('logos')}</td>${semCell(companySales.logoTCV,CONS_OBJECTIVES.logos)}</tr>
+        <tr><td>Ventas nuevas · existentes (TCV)</td>${realCell(companySales.existTCV,'existing','Existente')}<td>${coMetaCell('existing')}</td>${semCell(companySales.existTCV,CONS_OBJECTIVES.existing)}</tr>
+        ${detailRow('Existente',4)}
+        <tr><td>Ventas nuevas · logos (TCV)</td>${realCell(companySales.logoTCV,'logos','Logo nuevo')}<td>${coMetaCell('logos')}</td>${semCell(companySales.logoTCV,CONS_OBJECTIVES.logos)}</tr>
+        ${detailRow('Logo nuevo',4)}
         <tr><td>Revenue (NRR, Q)</td>${realCell(companyRevenue,'nrr')}<td>${coMetaCell('nrr')}</td>${semCell(companyRevenue,CONS_OBJECTIVES.nrr)}</tr>
       </table>
+      <div class="muted" style="font-size:10.5px;margin-top:6px">Click en un monto de Real (existentes/logos) para ver el detalle de cuentas.</div>
       ${isAdminCO?`<div class="row-actions" style="margin-top:10px"><button class="btn ghost" id="btn-co-obj">Guardar objetivo</button><span class="saved-flag" id="co-obj-flag"></span></div>`:''}
     </div>
     <label class="fld" style="margin:20px 0 4px">Gráficos</label>
@@ -1779,6 +1794,10 @@ function renderConsolidated(){
       if(res.ok)setTimeout(()=>{if(flag2)flag2.textContent='';},4000);}
   };
   $$('#panel .score-card').forEach(card=>card.onclick=()=>{ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
+  $$('#panel .co-tcv-toggle').forEach(el=>el.onclick=()=>{
+    const row=$$('#panel .co-detail-row').find(r=>r.dataset.type===el.dataset.type);
+    if(row)row.classList.toggle('hidden');
+  });
 }
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
 
