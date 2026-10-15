@@ -214,6 +214,7 @@ details.howto b{color:var(--ink)}
     <p class="sub">Se sincroniza solo con la plataforma cada 2 horas (contratos firmados, ganancia mensual en USD). Ya no hace falta cargar el export de Power BI. Solo se consideran cuentas que facturan en el trimestre base.</p>
     <div class="loaded" id="loaded">✓ <span id="loaded-txt"></span></div>
     <div class="kpis hidden" id="revenue-kpis" style="margin-top:14px"></div>
+    <div id="revenue-objective-hero"></div>
   </div>
 
   <!-- 2. CONFIG -->
@@ -519,22 +520,27 @@ function init(){
 }
 // resumen de "real de la plataforma" a nivel compañía, siempre visible arriba de todo (card 1, Revenue)
 function refreshRevenueCard(){
-  const el=$('#revenue-kpis');if(!el)return;
-  if(!QUARTERS.length){el.classList.add('hidden');return;}
-  const q=projQ();if(!q){el.classList.add('hidden');return;}
+  const el=$('#revenue-kpis');const heroEl=$('#revenue-objective-hero');
+  if(!el)return;
+  if(!QUARTERS.length){el.classList.add('hidden');if(heroEl)heroEl.innerHTML='';return;}
+  const q=projQ();if(!q){el.classList.add('hidden');if(heroEl)heroEl.innerHTML='';return;}
   const prev=baseQ();const act=activeAccounts();const all=contractsFor('__cons__',act);
-  const rs=realSales(all,q);const rx=realExtensions(all,q,prev);const closed=isQuarterClosed(q);
+  const rx=realExtensions(all,q,prev);const closed=isQuarterClosed(q);
   el.classList.remove('hidden');
   // objetivo de la empresa (CONS_OBJECTIVES), debajo de cada KPI que tenga una meta equivalente —
   // % crudo real/meta, igual criterio que el resto de los medidores por métrica (no el ponderado de
-  // BONO_CURVES, que es para el cumplimiento total, no para una sola métrica suelta)
-  const realNRR=sumQ(all,q),nrrObj=CONS_OBJECTIVES.nrr,salesObj=(CONS_OBJECTIVES.existing||0)+(CONS_OBJECTIVES.logos||0);
+  // BONO_CURVES, que es para el cumplimiento total, no para una sola métrica suelta). Ventas nuevas
+  // separadas en existentes/logos (no un TCV combinado) para poder comparar cada una con su propia
+  // meta — mismo real que usa "Objetivo de la empresa" en Consolidado (companySalesFor, no "all").
+  const{companySales,companyRevenue,live}=companySalesFor(q);
   const objLine=(real,meta)=>{const p=completionPct(real,meta);return p==null?'':`Objetivo: ${fmt(meta)} · <b style="color:${completionColor(p)}">${p}% cumplido</b>`;};
   el.innerHTML=`
-    ${kpi('Net revenue real '+q.label,fmt(realNRR),closed?'resultado final':'a la fecha · se va completando solo','flat',objLine(realNRR,nrrObj))}
-    ${kpi('Ventas realizadas (TCV)',fmt(rs.totalTCV),'existentes + logos, ya facturando','up',objLine(rs.totalTCV,salesObj))}
+    ${kpi('Net revenue real '+q.label,fmt(companyRevenue),closed?'resultado final':'a la fecha · se va completando solo','flat',objLine(companyRevenue,CONS_OBJECTIVES.nrr))}
+    ${kpi('Ventas nuevas · existentes (TCV)',fmt(companySales.existTCV),'clientes con relación previa','up',objLine(companySales.existTCV,CONS_OBJECTIVES.existing))}
+    ${kpi('Ventas nuevas · logos (TCV)',fmt(companySales.logoTCV),'cuentas nuevas, ya facturando','up',objLine(companySales.logoTCV,CONS_OBJECTIVES.logos))}
     ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
     ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}`;
+  if(heroEl)heroEl.innerHTML=companyHeroHTML(live,q.label,'16px');
 }
 // fecha límite por trimestre: solo el admin la ve/edita; congela la proyección (solo visual) pasada esa fecha
 function refreshDeadlineCtrl(){
@@ -1450,6 +1456,26 @@ function newSalesSeries(list,buckets){
     return{label:b.label,existTCV,logoTCV};
   });
 }
+// objetivo de la empresa: ventas nuevas (TCV) + revenue reales de ese Q, contra CONS_OBJECTIVES.
+// Usa CONTRACTS directo (no "all"/activeAccounts, que deja afuera un logo nuevo sin revenue en el Q
+// base) — es el total real de la empresa, el mismo criterio en cualquier lugar que lo muestre.
+function companySalesFor(q){
+  const companySales=newSalesSeries(CONTRACTS,[{label:q.label,idx:q.idx}])[0]||{existTCV:0,logoTCV:0};
+  const companyRevenue=sumQ(CONTRACTS,q);
+  const live=liveObjectivePct(CONS_OBJECTIVES,companySales.existTCV,companySales.logoTCV,companyRevenue,true);
+  return{companySales,companyRevenue,live};
+}
+// mismo cálculo (BONO_CURVES) que el individual de "Inicio" — sin el candado de incentivos, que es
+// un concepto de elegibilidad por comercial, no de la empresa. Una sola plantilla de HTML para el
+// número grande, la use Consolidado > Resumen o la tarjeta "Revenue" de arriba.
+function companyHeroHTML(live,label,marginTop){
+  if(live==null)return '';
+  return `<div class="card" style="margin-top:${marginTop==null?'14px':marginTop};padding:34px;text-align:center;border:1px solid ${completionColor(live)};background:linear-gradient(180deg,rgba(255,255,255,.02),transparent)">
+      <div class="muted" style="font-size:12.5px;text-transform:uppercase;letter-spacing:.8px">Cumplimiento del objetivo de la empresa${label?' · '+label:''}</div>
+      <div style="font-size:84px;font-weight:800;line-height:1.1;color:${completionColor(live)}">${live}%</div>
+      <div class="gauge" style="margin-top:6px;padding:0;background:transparent"><div class="track"><div class="fill" style="width:${Math.min(100,Math.max(0,live))}%;background:${completionColor(live)}"></div></div></div>
+    </div>`;
+}
 // detalle: qué cuentas arrancaron a facturar (de verdad) dentro del período completo que muestra el gráfico
 function newSalesBreakdown(list,buckets){
   const allIdx=[...new Set(buckets.flatMap(b=>b.idx))];
@@ -1558,11 +1584,9 @@ function renderConsolidated(){
   const salesRowsDet=newSalesBreakdown(filteredList,buckets);
   const granLabel=CONS_FILTER.gran==='month'?'mes':CONS_FILTER.gran==='year'?'año':'trimestre';
   // ---- Objetivo de la empresa: un solo objetivo para todo Seeds (no por persona), visible para
-  // cualquiera en el Consolidado. Usa CONTRACTS directo (no "all"/activeAccounts, que deja afuera un
-  // logo nuevo sin revenue en el Q base) y nunca respeta CONS_FILTER — es el total real de la empresa,
-  // siempre, tal como los gráficos de abajo. Lo real se compara siempre contra el Q que se mira arriba.
-  const companySales=newSalesSeries(CONTRACTS,[{label:q.label,idx:q.idx}])[0]||{existTCV:0,logoTCV:0};
-  const companyRevenue=sumQ(CONTRACTS,q);
+  // cualquiera en el Consolidado. Nunca respeta CONS_FILTER — es el total real de la empresa, siempre,
+  // tal como los gráficos de abajo. Lo real se compara siempre contra el Q que se mira arriba.
+  const{companySales,companyRevenue,live:companyLive}=companySalesFor(q);
   // detalle de qué cuentas arrancaron a facturar ese Q (CONTRACTS directo, igual criterio que companySales,
   // no el filtrado/por-granularidad de los gráficos de abajo) — para el click en el TCV de existentes/logos
   const companySalesDetail=newSalesBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
@@ -1583,14 +1607,7 @@ function renderConsolidated(){
   };
   const detailRow=(tipo,colspan)=>`<tr class="co-detail-row hidden" data-type="${tipo}"><td colspan="${colspan}" style="padding:4px 4px 14px">${detailTableHTML(companySalesDetail.filter(r=>r.tipo===tipo))}</td></tr>`;
   const semCell=(real,meta)=>!meta?`<td class="sem" style="color:#777">—</td>`:(real>=meta?`<td class="sem" style="color:var(--green-bright)">✓</td>`:`<td class="sem" style="color:#ff8a8d">${fmt(real-meta)}</td>`);
-  // mismo cálculo (BONO_CURVES) que el individual de "Inicio" — sin el candado de incentivos, que es
-  // un concepto de elegibilidad por comercial, no de la empresa.
-  const companyLive=liveObjectivePct(CONS_OBJECTIVES,companySales.existTCV,companySales.logoTCV,companyRevenue,true);
-  const companyHero=companyLive!=null?`<div class="card" style="margin-top:0;padding:34px;text-align:center;border:1px solid ${completionColor(companyLive)};background:linear-gradient(180deg,rgba(255,255,255,.02),transparent)">
-      <div class="muted" style="font-size:12.5px;text-transform:uppercase;letter-spacing:.8px">Cumplimiento del objetivo de la empresa · ${q.label}</div>
-      <div style="font-size:84px;font-weight:800;line-height:1.1;color:${completionColor(companyLive)}">${companyLive}%</div>
-      <div class="gauge" style="margin-top:6px;padding:0;background:transparent"><div class="track"><div class="fill" style="width:${Math.min(100,Math.max(0,companyLive))}%;background:${completionColor(companyLive)}"></div></div></div>
-    </div>`:'';
+  const companyHero=companyHeroHTML(companyLive,q.label,'0');
   let htmlResumen=`<label class="fld" style="margin:20px 0 10px">Objetivo de la empresa · ${q.label}</label>
     ${companyHero}
     <div class="card" style="padding:16px 18px;margin-top:${companyHero?'14px':'0'}">
