@@ -460,16 +460,12 @@ function clientHadRevenueBefore(client,beforeIdx){
 // caen en un trimestre puntual) — así "cuánto vendimos" no se confunde con "cuánto de eso entra en este Q".
 // El primer mes puede venir prorrateado (el contrato arranca mediado el mes, el conector factura solo
 // los días que corren) — tomar ese prorrateo como "el ticket mensual" y multiplicarlo por la cantidad
-// de meses da un TCV más bajo que el real. En vez de eso: el primer mes se suma tal cual se facturó
-// (es la plata real de ese mes), y el ticket pleno para los meses restantes sale del mayor valor entre
-// el resto de los meses facturados (no del primero).
+// de meses da un TCV más bajo que el real (confirmado contra la plataforma: YPF/Brukiew daba 4.909
+// en vez de 23.792). La serie ya trae cada mes del contrato con su monto real (el primero prorrateado,
+// el resto al ticket pleno), así que sumarla tal cual es el TCV correcto — no hace falta reconstruir
+// nada a partir de un solo mes.
 function tcvOf(c){
-  const fi=firstIdx(c);if(fi<0)return 0;
-  const months=c.series.filter(v=>v>0).length;
-  if(months<=1)return c.series[fi]||0;
-  const resto=c.series.filter((v,i)=>v>0&&i!==fi);
-  const ticket=resto.length?Math.max(...resto):(c.series[fi]||0);
-  return (c.series[fi]||0)+ticket*(months-1);
+  return c.series.reduce((a,v)=>a+(v>0?v:0),0);
 }
 function realSales(list,q){
   let existQ=0,logoQ=0,existTCV=0,logoTCV=0;
