@@ -170,6 +170,14 @@ details.howto b{color:var(--ink)}
 .logo-group .lg-roles th{font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--g500);text-align:left;padding:7px 14px;border-top:1px solid var(--g200)}
 .logo-group .lg-roles td{padding:7px 14px;border-top:1px solid var(--g100)}
 .logo-group .lg-roles td.num,.logo-group .lg-roles th.num{text-align:right}
+/* .logo-group asume fondo claro (el resto de la app) — dentro de .gauge (siempre oscuro, #1f1f1d) el
+   texto de la tabla heredaba el color oscuro del body y quedaba invisible sobre ese fondo. */
+.gauge .logo-group{border-color:#3a3a38}
+.gauge .logo-group summary{background:#2a2a28;color:#fff}
+.gauge .logo-group summary:hover{background:#3a3a38}
+.gauge .logo-group summary .lg-meta{color:#bdbdbd}
+.gauge .logo-group .lg-roles th{color:#9a9a98;border-top-color:#3a3a38}
+.gauge .logo-group .lg-roles td{color:#e8e8e8;border-top-color:#333}
 .opp{display:flex;align-items:center;gap:14px;background:var(--g100);border-radius:var(--r-md);padding:14px 16px;margin-bottom:10px;border-left:3px solid var(--green)}
 .opp-main{flex:1}
 .opp-top{display:flex;align-items:center;gap:9px;margin-bottom:4px}
@@ -690,7 +698,7 @@ function personSummary(o){
   const seenRs=new Set();const rsList=[...viewList,...sharedSalesCreditFor(o,act)].filter(c=>{const k=ckey(c);if(seenRs.has(k))return false;seenRs.add(k);return true;});
   const rs=realSales(rsList,q);const rx=realExtensions(viewList,q,prev);
   const accts=[...acctsOf(o,act)].sort();
-  return{act,list,salesList,viewList,q,prev,base,curRev,rs,rx,accts};
+  return{act,list,salesList,viewList,rsList,q,prev,base,curRev,rs,rx,accts};
 }
 // pantalla principal de cada persona: solo lo real, sin nada para cargar (eso vive en "Proyección del Q")
 // curva de "% bono" por tramos de cumplimiento (no lineal, igual a la planilla de incentivos del
@@ -756,10 +764,14 @@ function objectiveRulesHTML(canHaveLogos){
   </details>`;
 }
 function renderHome(o){
-  const{viewList,salesList,q,rs,rx,base}=personSummary(o);
+  const{viewList,salesList,rsList,q,rs,rx,base}=personSummary(o);
   const closed=isQuarterClosed(q);
   const ob=OBJECTIVES[o]||{};
   const canHaveLogos=salesList.length>0;
+  // detalle de qué cuentas arman el TCV de "N. ventas existentes/logos" — pedido del equipo para poder
+  // ver qué se está contando, no solo el número total
+  const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
+  const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
   const lock=incentiveLock(ob,rs.existTCV,base);
   const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,base,canHaveLogos);
   const live=liveRaw==null?null:(lock.locked?0:liveRaw);
@@ -771,8 +783,8 @@ function renderHome(o){
       <div class="gauge" style="margin-top:4px;padding:0;background:transparent"><div class="track"><div class="fill" style="width:${Math.min(100,Math.max(0,live))}%;background:${completionColor(live)}"></div></div></div>
       ${lockNote}
       <div style="margin-top:18px;text-align:left">
-        ${ob.existing?meterRow('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing):''}
-        ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
+        ${ob.existing?meterRowDetail('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing,existDetail):''}
+        ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
         ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),base,ob.nrr):''}
       </div>
       ${objectiveRulesHTML(canHaveLogos)}
@@ -792,8 +804,10 @@ function renderHome(o){
 // con revenue y nuevas ventas reales por trimestre (mismos helpers que los gráficos del Consolidado) y
 // el objetivo/cumplimiento del Q en curso.
 function renderMisCuentas(o){
-  const{viewList,salesList,q,prev,base,rs,accts}=personSummary(o);
+  const{viewList,salesList,rsList,q,prev,base,rs,accts}=personSummary(o);
   if(MISCUENTAS_ACCT&&!accts.includes(MISCUENTAS_ACCT))MISCUENTAS_ACCT='';
+  const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
+  const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
   const buckets=periodBuckets('quarter');
   const yr=QUARTERS.length?QUARTERS[QUARTERS.length-1].y:'';
   const ob=OBJECTIVES[o]||{};
@@ -860,8 +874,8 @@ function renderMisCuentas(o){
         <div class="card" style="padding:16px 18px;margin-top:0">
           <div style="font-size:30px;font-weight:800;color:${completionColor(overall)};margin-bottom:10px">${overall}%</div>
           ${lockNote}
-          ${ob.existing?meterRow('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing):''}
-          ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
+          ${ob.existing?meterRowDetail('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing,existDetail):''}
+          ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
           ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),base,ob.nrr):''}
           ${objectiveRulesHTML(canHaveLogos)}
         </div>`:''}`;
@@ -911,6 +925,8 @@ function renderComercial(o){
   // (así no inflan el revenue/NRR de esta persona, ver sharedSalesCreditFor)
   const seenRs=new Set();const rsList=[...viewList,...sharedSalesCreditFor(o,act)].filter(c=>{const k=ckey(c);if(seenRs.has(k))return false;seenRs.add(k);return true;});
   const rs=realSales(rsList,q);const rx=realExtensions(viewList,q,prev);
+  const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
+  const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
   const nbC=newBreakdown(o);
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
   const __save=window.__ctx;window.__ctx={o,q,viewEnding,list};const extProjC=extExpected(o);window.__ctx=__save;
@@ -986,8 +1002,8 @@ function renderComercial(o){
       return `<h3 style="margin-top:20px">🏆 Cumplimiento ${q.label} <span style="color:#888;font-weight:500;text-transform:none">· Q cerrado</span></h3>
         ${overall!=null?`<div style="font-size:34px;font-weight:800;color:${completionColor(overall)};margin:4px 0 10px">${overall}%</div>`:'<div class="muted" style="margin:4px 0 10px">Sin metas cargadas</div>'}
         ${lockNote}
-        ${ob.existing?meterRow('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing):''}
-        ${canHaveLogos&&ob.logos?meterRow('N. ventas logos',rs.logoTCV,ob.logos):''}
+        ${ob.existing?meterRowDetail('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing,existDetail):''}
+        ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
         ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),realNRRv,ob.nrr):''}
         ${liveRaw!=null?objectiveRulesHTML(canHaveLogos):''}`;
     })():`<h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
@@ -1644,9 +1660,6 @@ function renderConsolidated(){
   const coMetaCell=(k)=>(isAdminCO&&CO_EDITING)
     ?`<input class="obj-in-co" data-k="${k}" type="number" min="0" step="1000" value="${CONS_OBJECTIVES[k]||''}" placeholder="—">`
     :`<span>${CONS_OBJECTIVES[k]?fmt(CONS_OBJECTIVES[k]):'<span class="muted">sin meta</span>'}</span>`;
-  const detailTableHTML=rows=>rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th class="num">TCV</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
-    </tbody></table>`:'<p class="muted" style="margin:0">Sin ventas de este tipo en el Q.</p>';
   // el objetivo cargado se muestra siempre como texto debajo del Real — así queda visible de una,
   // sea quien sea que mire, y no depende de leer el valor dentro de un input editable (admin). Si hay
   // tipo (existentes/logos), el Real es clickeable y despliega el detalle de cuentas de ese Q.
@@ -1655,7 +1668,7 @@ function renderConsolidated(){
     const valueHTML=tipo?`<span class="co-tcv-toggle" data-type="${tipo}" style="cursor:pointer;text-decoration:underline dotted #bbb" title="Ver detalle">${fmt(real)}</span>`:fmt(real);
     return `<td class="num">${valueHTML}${objCaption}</td>`;
   };
-  const detailRow=(tipo,colspan)=>`<tr class="co-detail-row hidden" data-type="${tipo}"><td colspan="${colspan}" style="padding:4px 4px 14px">${detailTableHTML(companySalesDetail.filter(r=>r.tipo===tipo))}</td></tr>`;
+  const detailRow=(tipo,colspan)=>`<tr class="co-detail-row hidden" data-type="${tipo}"><td colspan="${colspan}" style="padding:4px 4px 14px">${salesDetailTableHTML(companySalesDetail.filter(r=>r.tipo===tipo))}</td></tr>`;
   const semCell=(real,meta)=>!meta?`<td class="sem" style="color:#777">—</td>`:(real>=meta?`<td class="sem" style="color:var(--green-bright)">✓</td>`:`<td class="sem" style="color:#ff8a8d">${fmt(real-meta)}</td>`);
   let htmlResumen=`<label class="fld" style="margin:20px 0 10px">Objetivo de la empresa · ${q.label}</label>
     <div class="card" style="padding:16px 18px;margin-top:0">
@@ -1888,6 +1901,24 @@ function meterRow(label,real,meta,compact){
     <div class="t"><span>${label}</span><span style="color:${color}">${p==null?'sin meta':p+'%'}</span></div>
     <div class="track"><div class="fill" style="width:${w}%;background:${color}"></div></div>
     ${compact?'':`<div class="msg" style="color:${color}">${fmt(real)} de ${meta?fmt(meta):'—'}</div>`}
+  </div>`;
+}
+// tabla de detalle (cuenta/vendedor/TCV) para un desplegable "ver detalle" — una sola plantilla, la
+// use el meterRow de una persona o la tabla de "Objetivo de la empresa" en Consolidado.
+function salesDetailTableHTML(rows){
+  return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th class="num">TCV</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
+    </tbody></table>`:'<p class="muted" style="margin:0">Sin ventas de este tipo en el Q.</p>';
+}
+// mismo meterRow, con un desplegable nativo (<details>, sin JS) debajo mostrando qué cuentas arman ese TCV
+function meterRowDetail(label,real,meta,rows,compact){
+  const p=completionPct(real,meta);const color=completionColor(p);const w=p==null?0:Math.min(100,p);
+  const n=(rows||[]).length;
+  return `<div class="gauge" style="margin-top:${compact?'8px':'16px'};padding:${compact?'10px 12px':'14px'}">
+    <div class="t"><span>${label}</span><span style="color:${color}">${p==null?'sin meta':p+'%'}</span></div>
+    <div class="track"><div class="fill" style="width:${w}%;background:${color}"></div></div>
+    ${compact?'':`<div class="msg" style="color:${color}">${fmt(real)} de ${meta?fmt(meta):'—'}</div>`}
+    <details class="logo-group" style="margin-top:6px"><summary><span class="co" style="font-size:11.5px">Ver detalle${n?` (${n} cuenta${n===1?'':'s'})`:''}</span></summary>${salesDetailTableHTML(rows)}</details>
   </div>`;
 }
 
