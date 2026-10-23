@@ -458,11 +458,15 @@ function firstIdx(c){for(let i=0;i<c.series.length;i++)if(c.series[i]>0)return i
 // mes en que se VENDIÓ (oferta aceptada/firmada por cliente y talento) — lo trae el sync como
 // c.ventaMes ('AAAA-MM') cuando está disponible. Es la fecha correcta para decidir a qué Q pertenece
 // una venta nueva (así una oferta firmada en septiembre que arranca a facturar en octubre cae en Q3,
-// no en Q4 solo porque ahí es donde arranca la serie de revenue). Sin ventaMes (datos viejos, o sin
-// registro de firma) cae al primer mes que factura, como antes.
+// no en Q4 solo porque ahí es donde arranca la serie de revenue). Devuelve -1 cuando NO hay que tratarlo
+// como venta nueva en ninguno de los Q cargados:
+//  - con ventaMes fuera de la ventana de MONTHS (una venta vieja, de antes de lo que tenemos cargado):
+//    no hay que adivinar con el primer mes que factura, ya sabemos que no es nueva acá.
+//  - sin ventaMes (dato viejo, sync sin este campo todavía) y facturando ya desde el primerísimo mes
+//    cargado: no se puede saber si es nueva o ya venía de antes — misma cautela que existía antes.
 function saleMonthIdx(c){
-  if(c.ventaMes){const i=MONTHS.findIndex(m=>m.key===c.ventaMes);if(i>=0)return i;}
-  return firstIdx(c);
+  if(c.ventaMes)return MONTHS.findIndex(m=>m.key===c.ventaMes);
+  const fi=firstIdx(c);return fi>0?fi:-1;
 }
 function endsInWindow(c,q,prev){const L=lastIdx(c);return q.idx.includes(L)||(prev&&prev.idx.includes(L));}
 function endingCandidates(list,q,prev){return list.filter(c=>endsInWindow(c,q,prev));}
@@ -1537,7 +1541,7 @@ function newSalesSeries(list,buckets){
   return buckets.map(b=>{
     let existTCV=0,logoTCV=0;
     // por fecha de venta (saleMonthIdx), no por primer mes que factura — ver nota en realSales()
-    list.filter(c=>{const sm=saleMonthIdx(c);return sm>0&&b.idx.includes(sm);}).forEach(c=>{
+    list.filter(c=>{const sm=saleMonthIdx(c);return sm>=0&&b.idx.includes(sm);}).forEach(c=>{
       const sm=saleMonthIdx(c);const tcv=tcvOf(c);
       if(clientHadRevenueBefore(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
     });
@@ -1562,7 +1566,7 @@ function newSalesBreakdown(list,buckets){
   const allIdx=[...new Set(buckets.flatMap(b=>b.idx))];
   const rows=[];
   list.forEach(c=>{
-    const sm=saleMonthIdx(c);if(sm<=0||!allIdx.includes(sm))return;
+    const sm=saleMonthIdx(c);if(sm<0||!allIdx.includes(sm))return;
     const tcv=tcvOf(c);if(!tcv)return;
     rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
       tipo:clientHadRevenueBefore(c.client,sm)?'Existente':'Logo nuevo',tcv});

@@ -115,10 +115,12 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     };
     if (r.role) c.roles.add(r.role);
     months.forEach((m, i) => (c.series[i] = Math.round((c.series[i] + Number(r.by_month[m] ?? 0)) * 100) / 100));
-    // mes de venta: el más temprano entre los planted seeders que se consolidan en este mismo
-    // contrato (mismo cliente + persona + tipo), por si hay más de uno (ej. re-placement).
+    // mes de venta: el más reciente entre los planted seeders que se consolidan en este mismo
+    // contrato (mismo cliente + persona + tipo) — una re-contratación años después de un contrato
+    // viejo se consolida en la misma fila (mismo cliente/persona/tipo), y lo relevante para "a qué Q
+    // pertenece esta venta" es la firma más nueva, no la original de hace años.
     const vm = ventaByPsId.get(r.ps_id);
-    if (vm && (!c.ventaMes || vm < c.ventaMes)) c.ventaMes = vm;
+    if (vm && (!c.ventaMes || vm > c.ventaMes)) c.ventaMes = vm;
     byKey.set(k, c);
   }
   const contracts = [...byKey.values()]
