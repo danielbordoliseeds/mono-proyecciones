@@ -574,12 +574,13 @@ function refreshRevenueCard(){
   // así que no hay un "cumplimiento total" ponderado acá, cada métrica se compara contra su propia meta.
   // Ventas nuevas separadas en existentes/logos (no un TCV combinado) para poder comparar cada una con
   // su propia meta — mismo real que usa "Objetivo de la empresa" en Consolidado (companySalesFor, no "all").
-  const{companySales,companyRevenue}=companySalesFor(q);
+  const{companySales,companyRevenue,companySalesDetail}=companySalesFor(q);
+  const existDetail=companySalesDetail.filter(r=>r.tipo==='Existente'),logoDetail=companySalesDetail.filter(r=>r.tipo==='Logo nuevo');
   const objLine=(real,meta)=>{const p=completionPct(real,meta);return p==null?'':`Objetivo: ${fmt(meta)} · <b style="color:${completionColor(p)}">${p}% cumplido</b>`;};
   el.innerHTML=`
     ${kpi('Net revenue real '+q.label,fmt(companyRevenue),closed?'resultado final':'a la fecha · se va completando solo','flat',objLine(companyRevenue,CONS_OBJECTIVES.nrr))}
-    ${kpi('Ventas nuevas · existentes (TCV)',fmt(companySales.existTCV),'clientes con relación previa','up',objLine(companySales.existTCV,CONS_OBJECTIVES.existing))}
-    ${kpi('Ventas nuevas · logos (TCV)',fmt(companySales.logoTCV),'cuentas nuevas, ya facturando','up',objLine(companySales.logoTCV,CONS_OBJECTIVES.logos))}
+    ${kpi('Ventas nuevas · existentes (TCV)',fmt(companySales.existTCV),'clientes con relación previa','up',objLine(companySales.existTCV,CONS_OBJECTIVES.existing),existDetail)}
+    ${kpi('Ventas nuevas · logos (TCV)',fmt(companySales.logoTCV),'cuentas nuevas, ya facturando','up',objLine(companySales.logoTCV,CONS_OBJECTIVES.logos),logoDetail)}
     ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
     ${kpi('Extensiones pendientes',rx.pending.length+' contratos',closed?(rx.churned.length+' no se renovaron'):'todavía sin resolver','down')}`;
 }
@@ -1531,7 +1532,10 @@ function newSalesSeries(list,buckets){
 function companySalesFor(q){
   const companySales=newSalesSeries(CONTRACTS,[{label:q.label,idx:q.idx}])[0]||{existTCV:0,logoTCV:0};
   const companyRevenue=sumQ(CONTRACTS,q);
-  return{companySales,companyRevenue};
+  // detalle de qué cuentas arrancaron a facturar ese Q (CONTRACTS directo, igual criterio que companySales)
+  // — para el "ver detalle" tanto acá como en la tarjeta Revenue de arriba.
+  const companySalesDetail=newSalesBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
+  return{companySales,companyRevenue,companySalesDetail};
 }
 // detalle: qué cuentas arrancaron a facturar (de verdad) dentro del período completo que muestra el gráfico
 function newSalesBreakdown(list,buckets){
@@ -1653,10 +1657,7 @@ function renderConsolidated(){
   // no por persona ni uno solo combinado), visible para cualquiera en el Consolidado. Nunca respeta
   // CONS_FILTER — es el total real de la empresa, siempre, tal como los gráficos de abajo. Lo real se
   // compara siempre contra el Q que se mira arriba.
-  const{companySales,companyRevenue}=companySalesFor(q);
-  // detalle de qué cuentas arrancaron a facturar ese Q (CONTRACTS directo, igual criterio que companySales,
-  // no el filtrado/por-granularidad de los gráficos de abajo) — para el click en el TCV de existentes/logos
-  const companySalesDetail=newSalesBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
+  const{companySales,companyRevenue,companySalesDetail}=companySalesFor(q);
   const isAdminCO=!CURRENT_USER||CURRENT_USER.role==='admin';
   // el objetivo queda fijo (texto, no input) una vez guardado — "Editar objetivo" lo abre a edición
   // a propósito, así no es un casillero siempre tocable por accidente.
@@ -1892,7 +1893,10 @@ function renderConsolidated(){
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
 
 // ===== UI bits =====
-function kpi(k,v,d,cls,obj){return `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="d ${cls}">${d}</div>${obj?`<div class="d" style="color:var(--g500);font-weight:500">${obj}</div>`:''}</div>`;}
+function kpi(k,v,d,cls,obj,detailRows){
+  const detail=detailRows?`<details class="logo-group" style="margin-top:8px;text-align:left"><summary><span class="co" style="font-size:11.5px">Ver detalle${detailRows.length?` (${detailRows.length} cuenta${detailRows.length===1?'':'s'})`:''}</span></summary>${salesDetailTableHTML(detailRows)}</details>`:'';
+  return `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="d ${cls}">${d}</div>${obj?`<div class="d" style="color:var(--g500);font-weight:500">${obj}</div>`:''}${detail}</div>`;
+}
 function pct(a,b){if(!b)return '';const p=(a/b-1)*100;return (p>=0?'+':'')+p.toFixed(1)+'% vs base';}
 // contraste real/proyectado vs meta: usado tanto para meta vs proyectado (Consolidado) como para
 // proyectado vs real (bloque "Real de la plataforma") — mismo lenguaje visual (✓ o lo que falta).
