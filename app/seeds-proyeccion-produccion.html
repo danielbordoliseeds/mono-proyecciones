@@ -1615,7 +1615,9 @@ function renderConsolidated(){
     const nb=newBreakdown(o);
     // ventas nuevas (TCV): suma también las cuentas de SHARED_SALES_CREDIT, sin que entren a viewList
     // (no inflan el NRR de esta persona, ver sharedSalesCreditFor)
-    const rs=realSales([...sList,...sharedSalesCreditFor(o,act)],q);const rx=realExtensions(list,q,prev);
+    const rsListO=[...sList,...sharedSalesCreditFor(o,act)];
+    const rs=realSales(rsListO,q);const rx=realExtensions(list,q,prev);
+    const rowSalesDetail=newSalesBreakdown(rsListO,[{label:q.label,idx:q.idx}]);
     tExist+=nb.existTCV;tLogo+=nb.logoTCV;tExt+=ext;tNewQ+=(nb.existQ+nb.logoQ);tChurn+=chn;
     nb.logos.forEach(l=>allLogos.push({o:o.replace(' (Mono)',''),...l}));
     (stO.newLines||[]).filter(l=>(+l.qty)>0).forEach(l=>allNew.push({o:o.replace(' (Mono)',''),
@@ -1626,6 +1628,7 @@ function renderConsolidated(){
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
       cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
       realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExistTCV:rs.existTCV,realLogoTCV:rs.logoTCV,realExt:rx,realNRR:sumQ(viewList,q),
+      existDetail:rowSalesDetail.filter(r=>r.tipo==='Existente'),logoDetail:rowSalesDetail.filter(r=>r.tipo==='Logo nuevo'),
       nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
   const salesRows=rows.filter(r=>r.inSales),csRows=rows.filter(r=>r.inCS);
@@ -1729,8 +1732,8 @@ function renderConsolidated(){
             <b style="font-size:13px">#${i+1} ${nm(r.o)}</b>
             <span style="font-size:20px;font-weight:800;color:${completionColor(r.overall)}">${r.overall}%${r.lock.locked?' 🔒':''}</span>
           </div>
-          ${r.obj.existing?meterRow('N. existentes'+(r.lock.existOk?'':' 🔒'),r.realExistTCV,r.obj.existing,true):''}
-          ${r.canHaveLogos&&r.obj.logos?meterRow('Logos nuevos',r.realLogoTCV,r.obj.logos,true):''}
+          ${r.obj.existing?meterRowDetail('N. existentes'+(r.lock.existOk?'':' 🔒'),r.realExistTCV,r.obj.existing,r.existDetail,true):''}
+          ${r.canHaveLogos&&r.obj.logos?meterRowDetail('Logos nuevos',r.realLogoTCV,r.obj.logos,r.logoDetail,true):''}
           ${r.obj.nrr?meterRow('NRR'+(r.lock.nrrOk?'':' 🔒'),r.realNRR,r.obj.nrr,true):''}
         </div>`;});
       htmlResumen+=`</div>`;
@@ -1876,7 +1879,11 @@ function renderConsolidated(){
     if(flag2){flag2.textContent=res.text;flag2.style.color=res.ok?'var(--green)':'#d33';
       if(res.ok)setTimeout(()=>{if(flag2)flag2.textContent='';},4000);}
   };
-  $$('#panel .score-card').forEach(card=>card.onclick=()=>{ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
+  // el click en la tarjeta lleva a esa persona, salvo que el click haya sido dentro del desplegable
+  // de detalle (si no, abrir el detalle también navegaría, que no es lo que se busca)
+  $$('#panel .score-card').forEach(card=>card.onclick=(e)=>{
+    if(e.target.closest('details'))return;
+    ACTIVE=card.dataset.o;ACCT_FILTER='';render();});
   $$('#panel .co-tcv-toggle').forEach(el=>el.onclick=()=>{
     const row=$$('#panel .co-detail-row').find(r=>r.dataset.type===el.dataset.type);
     if(row)row.classList.toggle('hidden');
