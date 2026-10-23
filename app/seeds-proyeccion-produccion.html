@@ -473,9 +473,26 @@ function endingCandidates(list,q,prev){return list.filter(c=>endsInWindow(c,q,pr
 function isQuarterClosed(q){return !!(q&&q.end)&&new Date()>q.end;}
 function isFrozen(q){return !!(q&&DEADLINES[q.id]&&new Date()>new Date(DEADLINES[q.id]));}
 // cuánto de lo real de la plataforma (series ya sincronizada) corresponde a ventas nuevas de este Q:
-// separa logo nuevo (la cuenta no facturaba nada antes) de cliente existente (nueva línea)
-function clientHadRevenueBefore(client,beforeIdx){
-  return CONTRACTS.some(c=>c.client===client&&c.series.slice(0,beforeIdx).some(v=>v>0));
+// separa logo nuevo de cliente existente — no es un sí/no para siempre: una cuenta recién ganada
+// sigue contando como "logo nuevo" en CUALQUIER venta durante sus primeros 6 meses (regla de negocio:
+// toda venta a una cuenta ganada hace poco es logo nuevo durante esa ventana), no solo en la primera.
+const NEW_LOGO_WINDOW_MONTHS=6;
+// primer mes de venta de un cliente (el más temprano entre TODOS sus contratos, toda la empresa) — con
+// qué se mide la ventana de 6 meses. Sin fecha de venta conocida en ninguno de sus contratos, devuelve
+// null (cae al criterio viejo, por revenue, en isEstablishedClient).
+function clientFirstSaleIdx(client){
+  let min=null;
+  CONTRACTS.forEach(c=>{
+    if(c.client!==client||!c.ventaMes)return;
+    const i=MONTHS.findIndex(m=>m.key===c.ventaMes);
+    if(i>=0&&(min==null||i<min))min=i;
+  });
+  return min;
+}
+function isEstablishedClient(client,atIdx){
+  const first=clientFirstSaleIdx(client);
+  if(first==null)return CONTRACTS.some(c=>c.client===client&&c.series.slice(0,atIdx).some(v=>v>0));
+  return atIdx-first>=NEW_LOGO_WINDOW_MONTHS;
 }
 // TCV real de un contrato: net revenue mensual × cantidad total de meses que factura (no solo los que
 // caen en un trimestre puntual) — así "cuánto vendimos" no se confunde con "cuánto de eso entra en este Q".
@@ -495,14 +512,14 @@ function realSales(list,q){
   // facturar en octubre cuenta como venta de Q3, no de Q4 — aunque el billing real caiga en Q4.
   list.filter(c=>q.idx.includes(saleMonthIdx(c))).forEach(c=>{
     const sm=saleMonthIdx(c);const tcv=tcvOf(c);
-    if(clientHadRevenueBefore(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
+    if(isEstablishedClient(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
   });
   // "Real de la plataforma" (Q-impact): cuánto de eso ya está facturando DENTRO de este Q puntual — por
   // fecha real de arranque de facturación (firstIdx), sin importar en qué Q se vendió. Así un Q4 que
   // factura por primera vez una venta de Q3 sigue mostrando esa plata como "real" en Q4.
   list.filter(c=>q.idx.includes(firstIdx(c))).forEach(c=>{
     const fi=firstIdx(c);const real=q.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);
-    if(clientHadRevenueBefore(c.client,fi))existQ+=real;else logoQ+=real;
+    if(isEstablishedClient(c.client,fi))existQ+=real;else logoQ+=real;
   });
   return{existQ,logoQ,total:existQ+logoQ,existTCV,logoTCV,totalTCV:existTCV+logoTCV};
 }
@@ -1543,7 +1560,7 @@ function newSalesSeries(list,buckets){
     // por fecha de venta (saleMonthIdx), no por primer mes que factura — ver nota en realSales()
     list.filter(c=>{const sm=saleMonthIdx(c);return sm>=0&&b.idx.includes(sm);}).forEach(c=>{
       const sm=saleMonthIdx(c);const tcv=tcvOf(c);
-      if(clientHadRevenueBefore(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
+      if(isEstablishedClient(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
     });
     return{label:b.label,existTCV,logoTCV};
   });
@@ -1569,7 +1586,7 @@ function newSalesBreakdown(list,buckets){
     const sm=saleMonthIdx(c);if(sm<0||!allIdx.includes(sm))return;
     const tcv=tcvOf(c);if(!tcv)return;
     rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
-      tipo:clientHadRevenueBefore(c.client,sm)?'Existente':'Logo nuevo',tcv});
+      tipo:isEstablishedClient(c.client,sm)?'Existente':'Logo nuevo',tcv});
   });
   return rows.sort((a,b)=>b.tcv-a.tcv);
 }
