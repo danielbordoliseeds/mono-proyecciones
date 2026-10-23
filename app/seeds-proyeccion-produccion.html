@@ -492,6 +492,10 @@ function clientFirstSaleIdx(client){
 function isEstablishedClient(client,atIdx){
   const first=clientFirstSaleIdx(client);
   if(first==null)return CONTRACTS.some(c=>c.client===client&&c.series.slice(0,atIdx).some(v=>v>0));
+  // si hay revenue de este cliente ANTES del mes que creemos que es "la primera venta", la detección
+  // por ventaMes está incompleta (algún contrato viejo sin fecha de venta resuelta en el sync) — no
+  // tratarlo como logo nuevo: es un cliente viejo aunque no podamos fecharle la primera venta exacta.
+  if(CONTRACTS.some(c=>c.client===client&&c.series.slice(0,first).some(v=>v>0)))return true;
   return atIdx-first>=NEW_LOGO_WINDOW_MONTHS;
 }
 // TCV real de un contrato: net revenue mensual × cantidad total de meses que factura (no solo los que
@@ -1585,8 +1589,11 @@ function newSalesBreakdown(list,buckets){
   list.forEach(c=>{
     const sm=saleMonthIdx(c);if(sm<0||!allIdx.includes(sm))return;
     const tcv=tcvOf(c);if(!tcv)return;
+    // fechaVenta visible en el detalle — para poder ver a ojo por qué algo clasifica como clasifica,
+    // sin tener que ir a mirar la base.
     rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
-      tipo:isEstablishedClient(c.client,sm)?'Existente':'Logo nuevo',tcv});
+      tipo:isEstablishedClient(c.client,sm)?'Existente':'Logo nuevo',tcv,
+      fechaVenta:c.ventaMes||(MONTHS[sm]&&MONTHS[sm].key)||''});
   });
   return rows.sort((a,b)=>b.tcv-a.tcv);
 }
@@ -1958,8 +1965,8 @@ function meterRow(label,real,meta,compact){
 // tabla de detalle (cuenta/vendedor/TCV) para un desplegable "ver detalle" — una sola plantilla, la
 // use el meterRow de una persona o la tabla de "Objetivo de la empresa" en Consolidado.
 function salesDetailTableHTML(rows){
-  return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th class="num">TCV</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
+  return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Venta</th><th class="num">TCV</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td>${r.fechaVenta||'—'}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
     </tbody></table>`:'<p class="muted" style="margin:0">Sin ventas de este tipo en el Q.</p>';
 }
 // mismo meterRow, con un desplegable nativo (<details>, sin JS) debajo mostrando qué cuentas arman ese TCV
