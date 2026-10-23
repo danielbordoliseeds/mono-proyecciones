@@ -496,7 +496,11 @@ function isEstablishedClient(client,atIdx){
   // por ventaMes está incompleta (algún contrato viejo sin fecha de venta resuelta en el sync) — no
   // tratarlo como logo nuevo: es un cliente viejo aunque no podamos fecharle la primera venta exacta.
   if(CONTRACTS.some(c=>c.client===client&&c.series.slice(0,first).some(v=>v>0)))return true;
-  return atIdx-first>=NEW_LOGO_WINDOW_MONTHS;
+  // ventaMes solo tiene mes, no día — "6 meses desde el 24/04" vencen el 24/10, y una venta de
+  // octubre (mismo índice de mes que +6, sin saber el día exacto) puede caer antes o después de esa
+  // fecha según el día. Con ">" en vez de ">=" el mes exactamente +6 todavía cuenta como ventana
+  // abierta (el caso real de Dreamco: 1ra venta 24/04, 2da el 22/10 — sigue siendo logo nuevo).
+  return atIdx-first>NEW_LOGO_WINDOW_MONTHS;
 }
 // TCV real de un contrato: net revenue mensual × cantidad total de meses que factura (no solo los que
 // caen en un trimestre puntual) — así "cuánto vendimos" no se confunde con "cuánto de eso entra en este Q".
