@@ -46,10 +46,39 @@ export const SQL = `
     select ps_id, m, case when bool_or(usd is null) then null else sum(usd) end as usd
     from (${legs("grower_payments", "gp", 1)} union all ${legs("payments", "p", -1)}) x group by ps_id, m
   )
-  select trim(ps."clientName") as client, ps."clientId" as client_id, ps.type as ctype, nullif(trim(ps."seederRole"), '') as role,
+  select ps.id as ps_id, trim(ps."clientName") as client, ps."clientId" as client_id, ps.type as ctype, nullif(trim(ps."seederRole"), '') as role,
     trim(regexp_replace(ps."seederLastName" || ' ' || ps."seederFirstName", '\\s+', ' ', 'g')) as person,
     json_object_agg(nr.m, round(nr.usd::numeric, 2)) as by_month
   from nr join planted_seeders ps on ps.id = nr.ps_id and ps."deletedAt" is null
+  group by ps.id`;
+
+// Mes en que se VENDIÓ cada planted seeder (oferta firmada por cliente y talento — no el primer mes que
+// factura): para que una oferta aceptada en septiembre pero que arranca a facturar en octubre cuente
+// como venta nueva de Q3, no de Q4. Misma lógica que usa el conector de Seeds para "fecha de venta":
+// el primer cambio de estado a 'A' (Aprobada) de una offer no-extensión; si no hay registro de firma
+// pero la offer está aceptada, cae a la fecha de confirmación del candidato (contratos viejos sin logs).
+export const SQL_VENTA = `
+  with firma_offer as materialized (
+    select a."offerId" as offer_id, min(a."createdAt") as firma
+    from offer_audit_logs a join offer_logs ol on ol."offerAuditLogId" = a.id
+    where ol."changedProperty" = 'status' and ol."newValue" = 'A'
+    group by a."offerId"
+  )
+  select ps.id as ps_id,
+    to_char(
+      coalesce(
+        min(fo.firma) filter (where not coalesce(o."isExtension", false)),
+        case when bool_or(o.status = 'A') then (
+          select coalesce(min(l."createdAt") filter (where l.status = 'CON'),
+                  min(l."createdAt") filter (where l.status in ('WO','DO','H','FTE')))
+          from staffing_candidate_status_logs l where l."staffingCandidateId" = ps."staffingCandidateId"
+        ) end
+      ), 'YYYY-MM'
+    ) as venta_mes
+  from planted_seeders ps
+  left join offers o on o."plantedSeederId" = ps.id and o."deletedAt" is null
+  left join firma_offer fo on fo.offer_id = o.id
+  where ps."deletedAt" is null
   group by ps.id`;
 
 export function monthRange(from, to) {
@@ -66,11 +95,12 @@ const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const personKey = (client, person) =>
   `${norm(client).replace(/[^a-z0-9]/g, "")}|${norm(person).split(/[^a-z0-9]+/).filter(Boolean).sort().join(" ")}`;
 
-export function buildPayload(rows, months, prevContracts = [], owners = []) {
+export function buildPayload(rows, months, prevContracts = [], owners = [], ventas = []) {
   const prevName = new Map(prevContracts.map((c) => [personKey(c.client, c.person), c.person]));
   // La dupla de un cliente agrupado (Quilmes → AB InBev) es la del cliente del grupo.
   const ownersByName = new Map(owners.map((o) => [o.client, o]));
   const ownersById = new Map(owners.map((o) => [o.id, o]));
+  const ventaByPsId = new Map(ventas.map((v) => [v.ps_id, v.venta_mes]));
   const byKey = new Map();
   const sinTc = [];
   for (const r of rows) {
@@ -85,6 +115,10 @@ export function buildPayload(rows, months, prevContracts = [], owners = []) {
     };
     if (r.role) c.roles.add(r.role);
     months.forEach((m, i) => (c.series[i] = Math.round((c.series[i] + Number(r.by_month[m] ?? 0)) * 100) / 100));
+    // mes de venta: el más temprano entre los planted seeders que se consolidan en este mismo
+    // contrato (mismo cliente + persona + tipo), por si hay más de uno (ej. re-placement).
+    const vm = ventaByPsId.get(r.ps_id);
+    if (vm && (!c.ventaMes || vm < c.ventaMes)) c.ventaMes = vm;
     byKey.set(k, c);
   }
   const contracts = [...byKey.values()]

@@ -455,6 +455,15 @@ function priorQ(id){const i=QUARTERS.findIndex(q=>q.id===id);return i>0?QUARTERS
 function sumQ(list,q){return list.reduce((s,c)=>s+q.idx.reduce((a,i)=>a+c.series[i],0),0);}
 function lastIdx(c){for(let i=c.series.length-1;i>=0;i--)if(c.series[i]>0)return i;return -1;}
 function firstIdx(c){for(let i=0;i<c.series.length;i++)if(c.series[i]>0)return i;return -1;}
+// mes en que se VENDIÓ (oferta aceptada/firmada por cliente y talento) — lo trae el sync como
+// c.ventaMes ('AAAA-MM') cuando está disponible. Es la fecha correcta para decidir a qué Q pertenece
+// una venta nueva (así una oferta firmada en septiembre que arranca a facturar en octubre cae en Q3,
+// no en Q4 solo porque ahí es donde arranca la serie de revenue). Sin ventaMes (datos viejos, o sin
+// registro de firma) cae al primer mes que factura, como antes.
+function saleMonthIdx(c){
+  if(c.ventaMes){const i=MONTHS.findIndex(m=>m.key===c.ventaMes);if(i>=0)return i;}
+  return firstIdx(c);
+}
 function endsInWindow(c,q,prev){const L=lastIdx(c);return q.idx.includes(L)||(prev&&prev.idx.includes(L));}
 function endingCandidates(list,q,prev){return list.filter(c=>endsInWindow(c,q,prev));}
 function isQuarterClosed(q){return !!(q&&q.end)&&new Date()>q.end;}
@@ -477,9 +486,19 @@ function tcvOf(c){
 }
 function realSales(list,q){
   let existQ=0,logoQ=0,existTCV=0,logoTCV=0;
+  // TCV ("ventas nuevas"): a qué Q pertenece la venta — por fecha de VENTA (saleMonthIdx: oferta firmada
+  // por ambas partes), no por cuándo arranca a facturar. Una oferta firmada en septiembre que arranca a
+  // facturar en octubre cuenta como venta de Q3, no de Q4 — aunque el billing real caiga en Q4.
+  list.filter(c=>q.idx.includes(saleMonthIdx(c))).forEach(c=>{
+    const sm=saleMonthIdx(c);const tcv=tcvOf(c);
+    if(clientHadRevenueBefore(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
+  });
+  // "Real de la plataforma" (Q-impact): cuánto de eso ya está facturando DENTRO de este Q puntual — por
+  // fecha real de arranque de facturación (firstIdx), sin importar en qué Q se vendió. Así un Q4 que
+  // factura por primera vez una venta de Q3 sigue mostrando esa plata como "real" en Q4.
   list.filter(c=>q.idx.includes(firstIdx(c))).forEach(c=>{
-    const fi=firstIdx(c);const real=q.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);const tcv=tcvOf(c);
-    if(clientHadRevenueBefore(c.client,fi)){existQ+=real;existTCV+=tcv;}else{logoQ+=real;logoTCV+=tcv;}
+    const fi=firstIdx(c);const real=q.idx.reduce((a,i)=>a+(i>=fi?c.series[i]:0),0);
+    if(clientHadRevenueBefore(c.client,fi))existQ+=real;else logoQ+=real;
   });
   return{existQ,logoQ,total:existQ+logoQ,existTCV,logoTCV,totalTCV:existTCV+logoTCV};
 }
@@ -1366,7 +1385,7 @@ function suggestNRR(o){
 function velocity(list,q){
   const pi=QUARTERS.findIndex(x=>x.id===q.id);let sum=0,cnt=0,n=0;
   for(let k=pi-1;k>=Math.max(0,pi-3);k--){const qq=QUARTERS[k];
-    const news=list.filter(c=>qq.idx.includes(firstIdx(c)));sum+=sumQ(news,qq);cnt+=news.length;n++;}
+    const news=list.filter(c=>qq.idx.includes(saleMonthIdx(c)));sum+=sumQ(news,qq);cnt+=news.length;n++;}
   return{avg:n?sum/n:0,cnt:n?Math.round(cnt/n):0,n};
 }
 function opportunities(list,q,prev){
@@ -1517,9 +1536,10 @@ function accountBreakdown(list,buckets){
 function newSalesSeries(list,buckets){
   return buckets.map(b=>{
     let existTCV=0,logoTCV=0;
-    list.filter(c=>{const fi=firstIdx(c);return fi>0&&b.idx.includes(fi);}).forEach(c=>{
-      const fi=firstIdx(c);const tcv=tcvOf(c);
-      if(clientHadRevenueBefore(c.client,fi))existTCV+=tcv;else logoTCV+=tcv;
+    // por fecha de venta (saleMonthIdx), no por primer mes que factura — ver nota en realSales()
+    list.filter(c=>{const sm=saleMonthIdx(c);return sm>0&&b.idx.includes(sm);}).forEach(c=>{
+      const sm=saleMonthIdx(c);const tcv=tcvOf(c);
+      if(clientHadRevenueBefore(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
     });
     return{label:b.label,existTCV,logoTCV};
   });
@@ -1542,10 +1562,10 @@ function newSalesBreakdown(list,buckets){
   const allIdx=[...new Set(buckets.flatMap(b=>b.idx))];
   const rows=[];
   list.forEach(c=>{
-    const fi=firstIdx(c);if(fi<=0||!allIdx.includes(fi))return;
+    const sm=saleMonthIdx(c);if(sm<=0||!allIdx.includes(sm))return;
     const tcv=tcvOf(c);if(!tcv)return;
     rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
-      tipo:clientHadRevenueBefore(c.client,fi)?'Existente':'Logo nuevo',tcv});
+      tipo:clientHadRevenueBefore(c.client,sm)?'Existente':'Logo nuevo',tcv});
   });
   return rows.sort((a,b)=>b.tcv-a.tcv);
 }
