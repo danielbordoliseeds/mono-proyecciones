@@ -472,6 +472,12 @@ function endsInWindow(c,q,prev){const L=lastIdx(c);return q.idx.includes(L)||(pr
 function endingCandidates(list,q,prev){return list.filter(c=>endsInWindow(c,q,prev));}
 function isQuarterClosed(q){return !!(q&&q.end)&&new Date()>q.end;}
 function isFrozen(q){return !!(q&&DEADLINES[q.id]&&new Date()>new Date(DEADLINES[q.id]));}
+// alguien con visión de equipo (canViewConsolidado) puede entrar a la pestaña de otra persona para
+// VER, pero no para cargar nada ahí — ni checkboxes de extensión/baja, ni nuevas líneas, ni guardar
+// proyección. El admin sigue pudiendo editar cualquier pestaña, como siempre.
+function isReadOnlyView(o){
+  return !!(CURRENT_USER&&CURRENT_USER.role!=='admin'&&o!==CURRENT_USER.comercial_name);
+}
 // cuánto de lo real de la plataforma (series ya sincronizada) corresponde a ventas nuevas de este Q:
 // separa logo nuevo de cliente existente — no es un sí/no para siempre: una cuenta recién ganada
 // sigue contando como "logo nuevo" en CUALQUIER venta durante sus primeros 6 meses (regla de negocio:
@@ -685,10 +691,14 @@ function buildTabs(){
       ct.appendChild(buildSubs(consTabsMeta,CONS_TAB,id=>{CONS_TAB=id;render();scrollToPanel();}));
     }
   }
+  // canViewConsolidado: hoy Consolidado ya lo ve cualquiera logueado, así que este flag quedó libre —
+  // se reusa para "ver (no editar) la pestaña de cualquier persona", ej. un manager de equipo como la
+  // de CS viendo el desarrollo individual de todo su equipo, sin poder cargar nada por ellos.
+  const canViewAll=role==='admin'||!!(CURRENT_USER&&CURRENT_USER.canViewConsolidado);
   const order=[...people(),'Sin asignar'];
   order.forEach(o=>{
     if(role==='talent')return;                 // talent: solo consolidado (lectura)
-    if(role!=='admin' && o!==mine)return;       // comercial: solo su pestaña
+    if(!canViewAll && o!==mine)return;          // comercial sin visión de equipo: solo su pestaña
     const accts=acctsOf(o,act);
     const st=getState(o);const hasProj=st.newLines&&st.newLines.length;
     // una cuenta que solo factura en el Q base, ya resuelta como "no se extiende" y marcada por vencer
@@ -980,6 +990,10 @@ function renderComercial(o){
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
   const __save=window.__ctx;window.__ctx={o,q,viewEnding,list};const extProjC=extExpected(o);window.__ctx=__save;
   const frozen=isFrozen(q);
+  // alguien con visión de equipo (canViewConsolidado) o admin puede ENTRAR a la pestaña de otra
+  // persona, pero no cargar ni guardar nada ahí — checkboxes, nuevas líneas y "Guardar proyección"
+  // quedan deshabilitados, igual que con un Q congelado.
+  const readOnlyOther=isReadOnlyView(o);
 
   let html=`<h2><span class="n">3</span>${o} · ${q.label}</h2>
     <p class="sub">${accts.length} cuentas activas · base ${prev?prev.label:'—'}. La meta es +${g}% sobre el Q anterior.</p>
@@ -1073,7 +1087,7 @@ function renderComercial(o){
     <div class="ps-row"><span class="l">− Bajas (churn)</span><span class="r" id="ps-churn" style="color:#ff8a8d">$0</span></div>
     <div class="ps-row tot"><span class="l">Revenue Q proyectado</span><span class="r" id="ps-tot">$0</span></div>
     ${objBlock}
-    <div class="row-actions">${frozen?'':'<button class="btn primary" id="btn-save">💾 Guardar proyección</button>'}<button class="btn ghost" id="btn-exp">⬇ Exportar Excel</button><span class="saved-flag" id="save-flag"></span></div>
+    <div class="row-actions">${frozen||readOnlyOther?'':'<button class="btn primary" id="btn-save">💾 Guardar proyección</button>'}<button class="btn ghost" id="btn-exp">⬇ Exportar Excel</button><span class="saved-flag" id="save-flag"></span></div>
   </div></div>`;
   $('#panel').innerHTML=html;
   window.__ctx={o,q,prev,list,salesList,viewList,viewEnding,accts,target,curRev,base,avg,avgClient};
@@ -1103,7 +1117,7 @@ function showSub(which){
   const L=$('#panL');const{o,q,prev,accts,list}=window.__ctx;const st=getState(o);
   let viewList=window.__ctx.viewList||list,ending=window.__ctx.viewEnding||window.__ctx.ending;
   if(ACCT_FILTER){viewList=viewList.filter(c=>c.client===ACCT_FILTER);ending=ending.filter(c=>c.client===ACCT_FILTER);}
-  const frozen=isFrozen(q);
+  const frozen=isFrozen(q)||isReadOnlyView(o);
   if(which==='ong'){
     const refIdx=(prev||q).idx[2];
     const ong=(viewList||[]).map(c=>{const rm=c.series[refIdx]||0;const rq=q.idx.reduce((a,i)=>a+(c.series[i]||0),0);return{c,rm,rq};})
