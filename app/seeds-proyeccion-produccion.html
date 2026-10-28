@@ -315,6 +315,13 @@ const FTE_ACCOUNTS={
 // sigue viniendo del sync cada 2 horas) ni el revenue/NRR en curso, solo el objetivo de ventas nuevas.
 const SHARED_SALES_CREDIT={
   'BHP':['Juan Maggiolo'],
+  'YPF':['Jose María Imaz (Mono)'],
+};
+// Igual que SHARED_SALES_CREDIT pero para el NRR/revenue en curso (objetivo de "ventas existentes" y de
+// NRR): a estas personas también les cuenta completo, además de a quien figura como CS/vendedor oficial.
+// Mismo criterio: no toca la dupla real ni entra en viewList/"Mis cuentas", solo el % de cumplimiento.
+const SHARED_NRR_CREDIT={
+  'YPF':['Jose María Imaz (Mono)'],
 };
 // Dupla por cuenta (viene de la plataforma en el revenue sincronizado): el vendedor proyecta ventas nuevas y
 // el CS extensiones y bajas; sin CS, el vendedor proyecta todo. Sin dupla (CSV de Power BI) se usa OWNERS.
@@ -569,12 +576,14 @@ function contractsFor(comercial,activeSet){
 function salesContractsFor(comercial,activeSet){
   return CONTRACTS.filter(c=>activeSet.has(c.client)&&ownerOf(c.client)===comercial);
 }
-// cuentas de SHARED_SALES_CREDIT para esta persona (excluye las que ya son suyas, para no duplicar si
-// se unen ambas listas). Solo para el real de "ventas nuevas (TCV)" — a propósito NO entra en acctsOf
-// ni en la cartera combinada (viewList), así no infla el revenue/NRR de nadie, solo ese objetivo puntual.
-function sharedSalesCreditFor(comercial,activeSet){
-  return CONTRACTS.filter(c=>activeSet.has(c.client)&&(SHARED_SALES_CREDIT[c.client]||[]).includes(comercial)&&ownerOf(c.client)!==comercial);
+// cuentas de SHARED_SALES_CREDIT/SHARED_NRR_CREDIT para esta persona (excluye las que ya son suyas, para
+// no duplicar si se unen ambas listas). A propósito NO entran en acctsOf ni en la cartera combinada
+// (viewList), así no inflan "Mis cuentas" ni ningún TOTAL del Consolidado, solo el objetivo puntual.
+function sharedCreditFor(map,comercial,activeSet){
+  return CONTRACTS.filter(c=>activeSet.has(c.client)&&(map[c.client]||[]).includes(comercial)&&ownerOf(c.client)!==comercial);
 }
+function sharedSalesCreditFor(comercial,activeSet){return sharedCreditFor(SHARED_SALES_CREDIT,comercial,activeSet);}
+function sharedNRRCreditFor(comercial,activeSet){return sharedCreditFor(SHARED_NRR_CREDIT,comercial,activeSet);}
 function acctsOf(o,activeSet){
   const s=new Set([...contractsFor(o,activeSet),...salesContractsFor(o,activeSet)].map(c=>c.client));
   (FTE_ACCOUNTS[o]||[]).forEach(a=>s.add(a));
@@ -756,8 +765,12 @@ function personSummary(o){
   // no entran en viewList, así no inflan el revenue/NRR de esta persona (ver sharedSalesCreditFor)
   const seenRs=new Set();const rsList=[...viewList,...sharedSalesCreditFor(o,act)].filter(c=>{const k=ckey(c);if(seenRs.has(k))return false;seenRs.add(k);return true;});
   const rs=realSales(rsList,q);const rx=realExtensions(viewList,q,prev);
+  // NRR/revenue en curso para el % de cumplimiento del objetivo: suma también las cuentas de
+  // SHARED_NRR_CREDIT — a propósito solo para esto (ver sharedNRRCreditFor), no entra en viewList.
+  const seenNrr=new Set();const nrrCreditList=[...viewList,...sharedNRRCreditFor(o,act)].filter(c=>{const k=ckey(c);if(seenNrr.has(k))return false;seenNrr.add(k);return true;});
+  const nrrCredit=sumQ(nrrCreditList,q);
   const accts=[...acctsOf(o,act)].sort();
-  return{act,list,salesList,viewList,rsList,q,prev,base,curRev,rs,rx,accts};
+  return{act,list,salesList,viewList,rsList,q,prev,base,curRev,rs,rx,accts,nrrCredit};
 }
 // pantalla principal de cada persona: solo lo real, sin nada para cargar (eso vive en "Proyección del Q")
 // curva de "% bono" por tramos de cumplimiento (no lineal, igual a la planilla de incentivos del
@@ -823,7 +836,7 @@ function objectiveRulesHTML(canHaveLogos){
   </details>`;
 }
 function renderHome(o){
-  const{viewList,salesList,rsList,q,rs,rx,base}=personSummary(o);
+  const{viewList,salesList,rsList,q,rs,rx,base,nrrCredit}=personSummary(o);
   const closed=isQuarterClosed(q);
   const ob=OBJECTIVES[o]||{};
   const canHaveLogos=salesList.length>0;
@@ -831,8 +844,8 @@ function renderHome(o){
   // ver qué se está contando, no solo el número total
   const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
   const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
-  const lock=incentiveLock(ob,rs.existTCV,base);
-  const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,base,canHaveLogos);
+  const lock=incentiveLock(ob,rs.existTCV,nrrCredit);
+  const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,nrrCredit,canHaveLogos);
   const live=liveRaw==null?null:(lock.locked?0:liveRaw);
   const missing=[];if(!lock.existOk)missing.push('50% en N. ventas existentes');if(!lock.nrrOk)missing.push('75% en NRR');
   const lockNote=(liveRaw!=null&&lock.locked)?`<div class="pill end-now" style="margin-top:12px;display:inline-block;font-size:11px">🔒 Bloqueado — falta ${missing.join(' y ')} para empezar a cobrar incentivos</div>`:'';
@@ -844,7 +857,7 @@ function renderHome(o){
       <div style="margin-top:18px;text-align:left">
         ${ob.existing?meterRowDetail('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing,existDetail):''}
         ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
-        ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),base,ob.nrr):''}
+        ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),nrrCredit,ob.nrr):''}
       </div>
       ${objectiveRulesHTML(canHaveLogos)}
     </div>`:`<div class="section-note" style="margin-top:0">Todavía no tenés objetivo cargado para ${q.label} — lo carga el admin.</div>`;
@@ -863,7 +876,7 @@ function renderHome(o){
 // con revenue y nuevas ventas reales por trimestre (mismos helpers que los gráficos del Consolidado) y
 // el objetivo/cumplimiento del Q en curso.
 function renderMisCuentas(o){
-  const{viewList,salesList,rsList,q,prev,base,rs,accts}=personSummary(o);
+  const{viewList,salesList,rsList,q,prev,base,rs,accts,nrrCredit}=personSummary(o);
   if(MISCUENTAS_ACCT&&!accts.includes(MISCUENTAS_ACCT))MISCUENTAS_ACCT='';
   const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
   const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
@@ -913,8 +926,8 @@ function renderMisCuentas(o){
     const totalMes=byAcct.reduce((s,x)=>s+x.revMes,0);
     const top=byAcct[0];
     const canHaveLogos=salesList.length>0;
-    const lock=incentiveLock(ob,rs.existTCV,base);
-    const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,base,canHaveLogos);
+    const lock=incentiveLock(ob,rs.existTCV,nrrCredit);
+    const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,nrrCredit,canHaveLogos);
     const overall=liveRaw==null?null:(lock.locked?0:liveRaw);
     const missing=[];if(!lock.existOk)missing.push('50% en N. ventas existentes');if(!lock.nrrOk)missing.push('75% en NRR');
     const lockNote=(liveRaw!=null&&lock.locked)?`<div class="pill end-now" style="margin-top:8px;display:inline-block;font-size:11px">🔒 Bloqueado — falta ${missing.join(' y ')} para empezar a cobrar incentivos</div>`:'';
@@ -935,7 +948,7 @@ function renderMisCuentas(o){
           ${lockNote}
           ${ob.existing?meterRowDetail('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing,existDetail):''}
           ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
-          ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),base,ob.nrr):''}
+          ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),nrrCredit,ob.nrr):''}
           ${objectiveRulesHTML(canHaveLogos)}
         </div>`:''}`;
   }else{
@@ -986,6 +999,10 @@ function renderComercial(o){
   const rs=realSales(rsList,q);const rx=realExtensions(viewList,q,prev);
   const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
   const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
+  // NRR/revenue en curso para el % de cumplimiento del objetivo (scoreboard de Q cerrado, abajo): suma
+  // también las cuentas de SHARED_NRR_CREDIT, sin que entren a viewList (ver sharedNRRCreditFor).
+  const seenNrr=new Set();const nrrCreditList=[...viewList,...sharedNRRCreditFor(o,act)].filter(c=>{const k=ckey(c);if(seenNrr.has(k))return false;seenNrr.add(k);return true;});
+  const nrrCredit=sumQ(nrrCreditList,q);
   const nbC=newBreakdown(o);
   // extExpected(o) lee window.__ctx en vez de usar o (ver renderConsolidated) — lo seteamos temporalmente
   const __save=window.__ctx;window.__ctx={o,q,viewEnding,list};const extProjC=extExpected(o);window.__ctx=__save;
@@ -1050,7 +1067,7 @@ function renderComercial(o){
   const nrrSuggHint=nrrSugg?`<div class="muted" style="font-size:10.5px;margin-top:3px">Sugerido: <a href="#" id="nrr-suggest" data-v="${nrrSugg.value}" style="color:var(--green)">${fmt(nrrSugg.value)}</a> (${nrrSugg.growth>=0?'+':''}${(nrrSugg.growth*100).toFixed(1)}% vs ${prev?prev.label:'Q anterior'}, mín. 7%)</div>`:'';
   // Q cerrado (fecha límite pasada): la tabla editable de objetivos se reemplaza por el
   // scoreboard de cumplimiento (real vs meta) — ya no hay nada que cargar, solo leer.
-  const realNRRv=base;
+  const realNRRv=nrrCredit;
   // logos nuevos sigue siendo objetivo exclusivo del vendedor: si no tiene cartera de venta propia
   // (es CS puro), no le mostramos ese objetivo ni lo contamos en su cumplimiento
   const canHaveLogos=salesList.length>0;
@@ -1679,6 +1696,9 @@ function renderConsolidated(){
     // el NRR de un vendedor cuenta también lo que vende aunque la retención de esa cuenta sea de otra
     // persona, si no, el scoreboard le muestra 0% de NRR aunque en su propia "Inicio" sí le aparezca.
     const seenCk=new Set();const viewList=[...list,...sList].filter(c=>{const k=ckey(c);if(seenCk.has(k))return false;seenCk.add(k);return true;});
+    // NRR/revenue en curso para el scoreboard: suma también SHARED_NRR_CREDIT, sin que entre a viewList
+    // (ver sharedNRRCreditFor) — no afecta "base"/"nrrProj" de abajo, que son los que suman el TOTAL CS.
+    const seenNrrC=new Set();const nrrCreditListO=[...viewList,...sharedNRRCreditFor(o,act)].filter(c=>{const k=ckey(c);if(seenNrrC.has(k))return false;seenNrrC.add(k);return true;});
     const b=sumQ(list,q);const cur=sumQ(list,prev||q);
     const ending=endingCandidates(list,q,prev);
     const save=window.__ctx;window.__ctx={o,q,ending,list};const ext=extExpected(o);const chn=totalChurn(o,b);window.__ctx=save;
@@ -1697,7 +1717,7 @@ function renderConsolidated(){
     rows.push({o,inSales:sList.length>0,inCS:list.length>0,
       salesAccts:new Set(sList.map(c=>c.client)).size,csAccts:new Set(list.map(c=>c.client)).size,
       cur,base:b,ext,churn:chn,existTCV:nb.existTCV,logoTCV:nb.logoTCV,newQ:nb.existQ+nb.logoQ,
-      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExistTCV:rs.existTCV,realLogoTCV:rs.logoTCV,realExt:rx,realNRR:sumQ(viewList,q),
+      realSalesQ:rs.total,realExistQ:rs.existQ,realLogoQ:rs.logoQ,realExistTCV:rs.existTCV,realLogoTCV:rs.logoTCV,realExt:rx,realNRR:sumQ(nrrCreditListO,q),
       existDetail:rowSalesDetail.filter(r=>r.tipo==='Existente'),logoDetail:rowSalesDetail.filter(r=>r.tipo==='Logo nuevo'),
       nrrProj:b+ext+nb.existQ-chn,obj:OBJECTIVES[o]||{}});});
   const totRetQ=base+tExt+tNewQ-tChurn;
