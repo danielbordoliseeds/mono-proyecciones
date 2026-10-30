@@ -27,11 +27,12 @@ export const SQL_OWNERS = `
   left join seeds_admin_users cs on cs.id = cl."customerSuccessId"
   where cl."deletedAt" is null`;
 
-const toUsd = (a) => `case ${a}.currency when 'USD' then ${a}.rate
-  else ${a}.rate / nullif((select mer.value from monthly_exchange_rates mer
-    where mer.currency = case ${a}.currency when 'ARS' then 'ARS-CCL' else ${a}.currency end
-    order by (to_char(mer."createdAt", 'YYYY-MM') <= to_char(${a}."invoiceDate", 'YYYY-MM')) desc, mer."createdAt" desc
+const amtToUsd = (amount, currency, dateExpr) => `case ${currency} when 'USD' then ${amount}
+  else ${amount} / nullif((select mer.value from monthly_exchange_rates mer
+    where mer.currency = case ${currency} when 'ARS' then 'ARS-CCL' else ${currency} end
+    order by (to_char(mer."createdAt", 'YYYY-MM') <= to_char(${dateExpr}, 'YYYY-MM')) desc, mer."createdAt" desc
     limit 1), 0) end`;
+const toUsd = (a) => amtToUsd(`${a}.rate`, `${a}.currency`, `${a}."invoiceDate"`);
 
 const legs = (table, a, sign) => `
   select o."plantedSeederId" as ps_id, to_char(${a}."invoiceDate", 'YYYY-MM') as m, ${sign} * ${toUsd(a)} as usd
@@ -81,6 +82,31 @@ export const SQL_VENTA = `
   where ps."deletedAt" is null
   group by ps.id`;
 
+// Placements FTE (DIRECT_HIRING): contratación directa con fee único, sin offer ni planted_seeder —
+// por eso no aparecen en SQL ni en SQL_VENTA (ambas parten de planted_seeders). La venta es el paso del
+// candidato a estado FTE/H (igual criterio que net_sales_confirmados); el fee lo guarda el propio
+// staffing_candidate (fteFee/fteFeeCurrency). Parámetros: $1 = primer mes, $2 = último mes (AAAA-MM).
+export const SQL_FTE = `
+  select sc.id as sc_id, trim(cl.client) as client, cl.id as client_id,
+    trim(regexp_replace(sd."firstName" || ' ' || sd."lastName", '\\s+', ' ', 'g')) as person,
+    trim(sr.title) as role, to_char(f.contratado, 'YYYY-MM') as venta_mes,
+    round((${amtToUsd('sc."fteFee"', 'sc."fteFeeCurrency"', "f.contratado")})::numeric, 2) as fee_usd
+  from staffing_candidates sc
+  join seeders sd on sd.id = sc."seederId"
+  join staffing_requests sr on sr.id = sc."staffingRequestId" and sr.type = 'DIRECT_HIRING'
+  join lateral (
+    select min(l."createdAt") filter (where l.status in ('FTE', 'H'))::date as contratado
+    from staffing_candidate_status_logs l where l."staffingCandidateId" = sc.id
+  ) f on f.contratado is not null
+  left join lateral (
+    select cc."clientId" from staffing_request_client_access acc
+    join client_contacts cc on cc.id = acc."clientContactId"
+    where acc."staffingRequestId" = sr.id and acc."isOwner" = true and acc."deletedAt" is null limit 1
+  ) own on true
+  left join clients cl on cl.id = own."clientId"
+  where sc."deletedAt" is null and sc."fteFee" is not null and cl.id is not null
+    and to_char(f.contratado, 'YYYY-MM') between $1 and $2`;
+
 export function monthRange(from, to) {
   const months = [];
   for (let d = new Date(from + "-01T00:00:00Z"); d.toISOString().slice(0, 7) <= to; d.setUTCMonth(d.getUTCMonth() + 1))
@@ -95,7 +121,7 @@ const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const personKey = (client, person) =>
   `${norm(client).replace(/[^a-z0-9]/g, "")}|${norm(person).split(/[^a-z0-9]+/).filter(Boolean).sort().join(" ")}`;
 
-export function buildPayload(rows, months, prevContracts = [], owners = [], ventas = []) {
+export function buildPayload(rows, months, prevContracts = [], owners = [], ventas = [], ftes = []) {
   const prevName = new Map(prevContracts.map((c) => [personKey(c.client, c.person), c.person]));
   // La dupla de un cliente agrupado (Quilmes → AB InBev) es la del cliente del grupo.
   const ownersByName = new Map(owners.map((o) => [o.client, o]));
@@ -121,6 +147,28 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     // pertenece esta venta" es la firma más nueva, no la original de hace años.
     const vm = ventaByPsId.get(r.ps_id);
     if (vm && (!c.ventaMes || vm > c.ventaMes)) c.ventaMes = vm;
+    byKey.set(k, c);
+  }
+  // FTE (DIRECT_HIRING): fee único, no revenue mensual — se carga como contrato ctype "FTE" con el fee
+  // puesto en el único mes de la venta. tcvOf/sumQ no distinguen ctype, así que cuenta igual que
+  // Seeder/Hire para TCV y NRR (decisión de Mono), solo que nunca se mezcla con los contratos de SQL.
+  for (const f of ftes) {
+    const mi = months.indexOf(f.venta_mes);
+    if (mi < 0 || f.fee_usd == null) {
+      if (f.fee_usd == null) sinTc.push(`FTE: ${f.client} / ${f.person}`);
+      continue;
+    }
+    const client = CLIENT_GROUP[f.client] || f.client;
+    const person = prevName.get(personKey(client, f.person)) || f.person;
+    const k = `${client}|${person}|FTE`;
+    const own = ownersByName.get(client) || ownersById.get(f.client_id) || {};
+    const c = byKey.get(k) || {
+      client, ctype: "FTE", person, series: months.map(() => 0),
+      vendedor: toolName(own.vendedor), cs: toolName(own.cs), roles: new Set(),
+    };
+    if (f.role) c.roles.add(f.role);
+    c.series[mi] = Math.round((c.series[mi] + Number(f.fee_usd)) * 100) / 100;
+    if (!c.ventaMes || f.venta_mes > c.ventaMes) c.ventaMes = f.venta_mes;
     byKey.set(k, c);
   }
   const contracts = [...byKey.values()]

@@ -4,7 +4,7 @@
 // de Supabase guardada en SSM.
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
-import { SQL, SQL_OWNERS, SQL_VENTA, monthRange, buildPayload, summarize } from "./payload.mjs";
+import { SQL, SQL_OWNERS, SQL_VENTA, SQL_FTE, monthRange, buildPayload, summarize } from "./payload.mjs";
 
 const DATA_FUNCTION = process.env.DATA_FUNCTION || "seeds-docs-mcp-data";
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://xrqxikvhhkkxitsbqxkv.supabase.co";
@@ -57,12 +57,13 @@ export async function runSync({ write = false, from, to, prevContracts, includeR
     prevContracts = prev?.contracts || [];
   }
 
-  const [rows, owners, ventas] = await Promise.all([
+  const [rows, owners, ventas, ftes] = await Promise.all([
     queryPlatform(SQL, [from, to]),
     queryPlatform(SQL_OWNERS, []),
     queryPlatform(SQL_VENTA, []),
+    queryPlatform(SQL_FTE, [from, to]),
   ]);
-  const { row, sinTc } = buildPayload(rows, months, prevContracts, owners, ventas);
+  const { row, sinTc } = buildPayload(rows, months, prevContracts, owners, ventas, ftes);
   const summary = summarize(row, sinTc);
 
   if (prevContracts.length && row.contracts.length < MIN_RATIO * prevContracts.length)
