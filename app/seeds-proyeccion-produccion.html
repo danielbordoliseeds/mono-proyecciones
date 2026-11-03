@@ -253,16 +253,15 @@ let CONS_OBJECTIVES={existing:0,logos:0,nrr:0}; // objetivo de toda la empresa, 
 let DEADLINES={};
 let CURRENT_USER=null, SB=null;
 const STATE={}; // per-comercial {ext:{key:{prob}}, unchecked:Set, newLines:[]}
-let ACTIVE='__cons__';
+let ACTIVE='__resumen__';
 let ACCT_FILTER=''; // filtro de cuenta dentro de la pestaña de una persona (extensiones/bajas/activos)
 let CONS_FILTER={gran:'quarter',account:'',vendedor:'',cs:''}; // filtros de los gráficos del Consolidado
-// sección activa del menú (Sales Command Center): 'proyq' | 'semanal' | 'consolidado' | 'tableros' | 'config' | 'objetivos'
+// sección activa del menú (Sales Command Center): 'proyq' | 'semanal' | 'tableros' | 'config' | 'objetivos'
 let NAV_SECTION='objetivos';
 const NAV_SECTIONS=[
   {id:'proyq',label:'📊 Proyecciones Q'},
   {id:'semanal',label:'📅 Proyecciones semanales'},
-  {id:'consolidado',label:'🧩 Consolidado'},
-  {id:'tableros',label:'📈 Tableros'},
+  {id:'tableros',label:'📊 Métricas'},
   {id:'config',label:'⚙️ Configuración'},
   {id:'objetivos',label:'🎯 Objetivos'},
 ];
@@ -276,6 +275,9 @@ let CONS_TAB='resumen'; // pestaña activa dentro del Consolidado
 let CO_EDITING=false; // true mientras el admin está editando el objetivo de la empresa (si no, meta fija)
 // etiquetas de las sub-pestañas — una sola fuente de verdad para el menú de la izquierda y el contenido
 const CONS_TAB_LABELS={resumen:'📊 Resumen',ventas:'💼 Equipo de Ventas',cs:'🤝 Equipo de CS',duplas:'🔗 Cuentas y duplas',brief:'🎯 Brief Talent Acquisition'};
+// las sub-pestañas de Métricas viven en el nav como ids '__<tab>__' (junto a Revenue y Mis cuentas, dentro
+// de la sección Tableros) — esto despeja de vuelta a cuál corresponde un ACTIVE, o null si no es una de ellas
+function metricasTabFromId(id){const m=id&&/^__(.+)__$/.exec(id);return(m&&CONS_TAB_LABELS[m[1]])?m[1]:null;}
 
 // ===== OWNER MAP (cruce HubSpot + indicaciones Mono, 25/06) — claves = nombre exacto del CSV =====
 const OWNERS={
@@ -599,11 +601,11 @@ function init(){
   const act=activeAccounts();const order=[...people(),'Sin asignar'];
   const withAccts=order.filter(o=>acctsOf(o,act).size>0);
   const role=(CURRENT_USER&&CURRENT_USER.role)||'admin';
-  if(role==='talent'){NAV_SECTION='consolidado';ACTIVE='__cons__';}
+  if(role==='talent'){NAV_SECTION='tableros';ACTIVE='__resumen__';}
   else if(role==='comercial'&&CURRENT_USER.comercial_name){NAV_SECTION='objetivos';ACTIVE=CURRENT_USER.comercial_name;}
   else{
     const def=withAccts.find(o=>o.includes('Mono'))||withAccts[0];
-    if(def){NAV_SECTION='objetivos';ACTIVE=def;}else{NAV_SECTION='consolidado';ACTIVE='__cons__';}
+    if(def){NAV_SECTION='objetivos';ACTIVE=def;}else{NAV_SECTION='tableros';ACTIVE='__resumen__';}
   }
   buildNav();render();
   if(typeof loadProjections==='function')loadProjections().then(()=>{refreshDeadlineCtrl();refreshRevenueCard();render();});
@@ -693,10 +695,10 @@ function renderSemanalSection(){
     <div class="section-note">Vive en un artifact aparte de claude.ai, con conector en vivo a Seeds Docs e IA para redactar la próxima acción — no se puede incrustar en este sitio. Cada persona necesita el conector <b>Seeds Docs</b> agregado en su cuenta de claude.ai.</div>
     <div class="row-actions" style="margin-top:16px"><a class="btn primary" href="${WEEKLY_FORECAST_URL}" target="_blank" rel="noopener">Abrir Proyecciones semanales ↗</a></div>`;
 }
-// sección Tableros · Revenue (empresa): el resumen de revenue real que antes estaba siempre arriba de
-// todo (card 1); ahora es la vista por defecto de Tableros cuando no se eligió un comercial puntual.
+// sección Métricas · Revenue (empresa): el resumen de revenue real que antes estaba siempre arriba de
+// todo (card 1); ahora es la vista por defecto de Métricas cuando no se eligió un comercial puntual.
 function renderRevenueOverview(){
-  $('#panel').innerHTML=`<h2><span class="n">3</span>Tableros · Revenue (empresa)</h2>
+  $('#panel').innerHTML=`<h2><span class="n">3</span>Métricas · Revenue (empresa)</h2>
     <p class="sub">Se sincroniza solo con la plataforma cada 2 horas (contratos firmados, ganancia mensual en USD). Solo se consideran cuentas que facturan en el trimestre base.</p>
     <div class="loaded" id="loaded" style="${CONTRACTS.length?'display:flex':''}">✓ <span id="loaded-txt">${REVENUE_LOADED_TXT}</span></div>
     <div class="kpis hidden" id="revenue-kpis" style="margin-top:14px"></div>`;
@@ -746,28 +748,26 @@ function buildNav(){
   const act=activeAccounts();
   const people=role==='talent'?[]:visibleComerciales();
   NAV_SECTIONS.forEach(sec=>{
-    if(role==='talent'&&sec.id!=='consolidado'&&sec.id!=='semanal'&&sec.id!=='objetivos')return; // talent: consolidado + sus propios objetivos
+    if(role==='talent'&&sec.id!=='tableros'&&sec.id!=='semanal'&&sec.id!=='objetivos')return; // talent: métricas (solo lectura) + sus propios objetivos
     const hdr=document.createElement('div');
-    hdr.className='side-item'+(sec.id==='consolidado'?' cons':'')+(NAV_SECTION===sec.id?' active':'');
+    hdr.className='side-item'+(sec.id==='tableros'?' cons':'')+(NAV_SECTION===sec.id?' active':'');
     hdr.textContent=sec.label;
     hdr.onclick=()=>{
       NAV_SECTION=sec.id;
-      if(sec.id==='consolidado')ACTIVE='__cons__';
-      else if(sec.id==='proyq'&&!people.includes(ACTIVE))ACTIVE=(CURRENT_USER&&CURRENT_USER.comercial_name&&people.includes(CURRENT_USER.comercial_name))?CURRENT_USER.comercial_name:(people[0]||ACTIVE);
-      else if(sec.id==='tableros'&&!people.includes(ACTIVE))ACTIVE='__revenue__';
+      if(sec.id==='proyq'&&!people.includes(ACTIVE))ACTIVE=(CURRENT_USER&&CURRENT_USER.comercial_name&&people.includes(CURRENT_USER.comercial_name))?CURRENT_USER.comercial_name:(people[0]||ACTIVE);
+      else if(sec.id==='tableros'&&ACTIVE!=='__revenue__'&&!metricasTabFromId(ACTIVE)&&!people.includes(ACTIVE))ACTIVE='__revenue__';
       else if(sec.id==='objetivos'&&ACTIVE!=='__org__'&&ACTIVE!=='__talent__'&&!people.includes(ACTIVE))ACTIVE=role==='talent'?'__talent__':'__org__';
       render();scrollToPanel();
     };
     root.appendChild(hdr);
     if(NAV_SECTION!==sec.id)return; // acordeón: lo demás queda colapsado
-    if(sec.id==='consolidado'){
-      const consTabsMeta=Object.entries(CONS_TAB_LABELS).map(([id,label])=>({id,label}));
-      root.appendChild(buildSubs(consTabsMeta,CONS_TAB,id=>{CONS_TAB=id;render();scrollToPanel();}));
-    }else if(sec.id==='proyq'){
+    if(sec.id==='proyq'){
       const items=people.map(o=>({id:o,label:o.replace(' (Mono)',''),badge:acctsOf(o,act).size,warn:o==='Sin asignar'}));
       root.appendChild(buildSubs(items,ACTIVE,id=>{ACTIVE=id;ACCT_FILTER='';render();scrollToPanel();}));
     }else if(sec.id==='tableros'){
-      const items=[{id:'__revenue__',label:'📈 Revenue (empresa)'},...people.map(o=>({id:o,label:o.replace(' (Mono)',''),badge:acctsOf(o,act).size,warn:o==='Sin asignar'}))];
+      const items=[{id:'__revenue__',label:'📈 Revenue (empresa)'},
+        ...Object.entries(CONS_TAB_LABELS).map(([id,label])=>({id:'__'+id+'__',label})),
+        ...people.map(o=>({id:o,label:o.replace(' (Mono)',''),badge:acctsOf(o,act).size,warn:o==='Sin asignar'}))];
       root.appendChild(buildSubs(items,ACTIVE,id=>{ACTIVE=id;render();scrollToPanel();}));
     }else if(sec.id==='objetivos'){
       const items=role==='talent'
@@ -799,8 +799,9 @@ function render(){
   buildNav(); // también arma, bajo la sección activa, su lista desplegada (comerciales o sub-pestañas)
   if(NAV_SECTION==='config'){renderConfigSection();return;}
   if(NAV_SECTION==='semanal'){renderSemanalSection();return;}
-  if(NAV_SECTION==='consolidado'){renderConsolidated();return;}
   if(NAV_SECTION==='tableros'){
+    const tabId=metricasTabFromId(ACTIVE);
+    if(tabId){CONS_TAB=tabId;renderConsolidated();return;}
     if(ACTIVE==='__revenue__'||!ACTIVE)renderRevenueOverview();else renderMisCuentas(ACTIVE);
     return;
   }
@@ -920,7 +921,7 @@ function renderObjetivos(o){
       ${objectiveRulesHTML(canHaveLogos)}
     </div>`:`<div class="section-note" style="margin-top:0">Todavía no tenés objetivo cargado para ${q.label} — lo carga el admin en Proyecciones Q.</div>`;
   $('#panel').innerHTML=`<h2><span class="n">3</span>Objetivos · ${o} · ${q.label}</h2>
-    <p class="sub">Cuánto llevás cumplido de tu meta, en vivo. Para el real por cuenta andá a Tableros; para cargar la proyección del Q, a Proyecciones Q.</p>
+    <p class="sub">Cuánto llevás cumplido de tu meta, en vivo. Para el real por cuenta andá a Métricas; para cargar la proyección del Q, a Proyecciones Q.</p>
     ${heroBlock}`;
 }
 // sección Objetivos · Organización: meta de toda la empresa (la carga el admin) + ranking de equipo,
@@ -1143,7 +1144,7 @@ function renderMisCuentas(o){
       <label class="fld" style="margin:22px 0 10px">Nuevas ventas por trimestre (TCV)</label>
       <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesByQ,SALES_SEGMENTS,'Sin nuevas ventas para esta cuenta.')}</div>`;
   }
-  $('#panel').innerHTML=`<h2><span class="n">3</span>Tableros · ${o}</h2>
+  $('#panel').innerHTML=`<h2><span class="n">3</span>Métricas · ${o}</h2>
     <p class="sub">El book completo de tus cuentas (vendedor + CS combinado), lo real de la plataforma. Para tu cumplimiento de objetivo andá a Objetivos; para cargar la proyección, a Proyecciones Q.</p>
     ${tabsHtml}${body}`;
   $$('#panel .tab[data-acct], #panel .acct-row[data-acct]').forEach(el=>el.onclick=()=>{MISCUENTAS_ACCT=el.dataset.acct;render();});
@@ -1920,7 +1921,7 @@ function renderConsolidated(){
   const nm=o=>o.replace(' (Mono)','');
   const growthPct=(cur,proj)=>{if(!cur)return '<span class="muted">—</span>';const p=(proj/cur-1)*100;const col=p>=0?'var(--green)':'var(--red)';return `<b style="color:${col}">${p>=0?'+':''}${p.toFixed(1)}%</b>`;};
   const closed=isQuarterClosed(q);
-  const header=`<h2><span class="n">3</span>Consolidado · ${q.label}</h2>
+  const header=`<h2><span class="n">3</span>Métricas · ${q.label}</h2>
     <p class="sub">${act.size} cuentas activas · ${salesRows.length} en ventas y ${csRows.length} en Customer Success. Meta de retención +${g}%.</p>
     <div class="section-note">Resumen de todos (solo lectura). <b>Para proyectar, entrá a la pestaña de cada persona</b>. Lo que cada uno carga se suma acá solo.</div>
     <div class="row-actions" style="margin-top:12px"><button class="btn primary" id="cons-exp">⬇ Exportar Excel (Consolidado + 1 pestaña por comercial)</button></div>`;
