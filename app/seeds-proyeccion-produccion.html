@@ -625,11 +625,11 @@ function refreshRevenueCard(){
   // así que no hay un "cumplimiento total" ponderado acá, cada métrica se compara contra su propia meta.
   // Ventas nuevas separadas en existentes/logos (no un TCV combinado) para poder comparar cada una con
   // su propia meta — mismo real que usa "Objetivo de la empresa" en Consolidado (companySalesFor, no "all").
-  const{companySales,companyRevenue,companySalesDetail}=companySalesFor(q);
+  const{companySales,companyRevenue,companySalesDetail,companyRevenueDetail}=companySalesFor(q);
   const existDetail=companySalesDetail.filter(r=>r.tipo==='Existente'),logoDetail=companySalesDetail.filter(r=>r.tipo==='Logo nuevo');
   const objLine=(real,meta)=>{const p=completionPct(real,meta);return p==null?'':`Objetivo: ${fmt(meta)} · <b style="color:${completionColor(p)}">${p}% cumplido</b>`;};
   el.innerHTML=`
-    ${kpi('Net revenue real '+q.label,fmt(companyRevenue),closed?'resultado final':'a la fecha · se va completando solo','flat',objLine(companyRevenue,CONS_OBJECTIVES.nrr))}
+    ${kpi('Net revenue real '+q.label,fmt(companyRevenue),closed?'resultado final':'a la fecha · se va completando solo','flat',objLine(companyRevenue,CONS_OBJECTIVES.nrr),companyRevenueDetail,'revenue')}
     ${kpi('Ventas nuevas · existentes (TCV)',fmt(companySales.existTCV),'clientes con relación previa','up',objLine(companySales.existTCV,CONS_OBJECTIVES.existing),existDetail)}
     ${kpi('Ventas nuevas · logos (TCV)',fmt(companySales.logoTCV),'cuentas nuevas, ya facturando','up',objLine(companySales.logoTCV,CONS_OBJECTIVES.logos),logoDetail)}
     ${kpi('Extensiones realizadas',fmt(rx.realizedQ),rx.pending.length+' contratos pendientes','flat')}
@@ -1799,7 +1799,9 @@ function companySalesFor(q){
   // detalle de qué cuentas arrancaron a facturar ese Q (CONTRACTS directo, igual criterio que companySales)
   // — para el "ver detalle" tanto acá como en la tarjeta Revenue de arriba.
   const companySalesDetail=newSalesBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
-  return{companySales,companyRevenue,companySalesDetail};
+  // mismo criterio que el "Detalle por cuenta" de Métricas › Resumen, para el "ver detalle" del Revenue real
+  const companyRevenueDetail=accountBreakdown(CONTRACTS,[{label:q.label,idx:q.idx}]);
+  return{companySales,companyRevenue,companySalesDetail,companyRevenueDetail};
 }
 // objetivo de Talent: compartido por todo el equipo (no por persona, como el de la empresa). Ventas
 // nuevas + existentes IGUAL que companySalesFor pero sin los contratos Seeds Hire (ctype CONTRACTOR) —
@@ -2088,8 +2090,9 @@ function renderConsolidated(){
 function pct2(a,b){if(!b)return '';const p=(a/b)*100;return p.toFixed(0)+'% de la meta';}
 
 // ===== UI bits =====
-function kpi(k,v,d,cls,obj,detailRows){
-  const detail=detailRows?`<details class="logo-group" style="margin-top:8px;text-align:left"><summary><span class="co" style="font-size:11.5px">Ver detalle${detailRows.length?` (${detailRows.length} cuenta${detailRows.length===1?'':'s'})`:''}</span></summary>${salesDetailTableHTML(detailRows)}</details>`:'';
+function kpi(k,v,d,cls,obj,detailRows,kind){
+  const tbl=kind==='revenue'?revenueDetailTableHTML(detailRows):salesDetailTableHTML(detailRows);
+  const detail=detailRows?`<details class="logo-group" style="margin-top:8px;text-align:left"><summary><span class="co" style="font-size:11.5px">Ver detalle${detailRows.length?` (${detailRows.length} cuenta${detailRows.length===1?'':'s'})`:''}</span></summary>${tbl}</details>`:'';
   return `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="d ${cls}">${d}</div>${obj?`<div class="d" style="color:var(--g500);font-weight:500">${obj}</div>`:''}${detail}</div>`;
 }
 function pct(a,b){if(!b)return '';const p=(a/b-1)*100;return (p>=0?'+':'')+p.toFixed(1)+'% vs base';}
@@ -2115,6 +2118,12 @@ function salesDetailTableHTML(rows){
   return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Venta</th><th class="num">TCV</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td>${r.fechaVenta||'—'}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
     </tbody></table>`:'<p class="muted" style="margin:0">Sin ventas de este tipo en el Q.</p>';
+}
+// mismo patrón que salesDetailTableHTML pero para revenue por cuenta (accountBreakdown): cuenta/contratos/revenue
+function revenueDetailTableHTML(rows){
+  return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th class="num">Contratos</th><th class="num">Revenue</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td><b>${r.client}</b></td><td class="num">${r.n}</td><td class="num">${fmt(r.revenue)}</td></tr>`).join('')}
+    </tbody></table>`:'<p class="muted" style="margin:0">Sin revenue en este Q.</p>';
 }
 // mismo meterRow, con un desplegable nativo (<details>, sin JS) debajo mostrando qué cuentas arman ese TCV
 function meterRowDetail(label,real,meta,rows,compact){
