@@ -850,16 +850,19 @@ function bonoFromCumplimiento(pct,curveKey){
 // objetivo en vivo: promedio ponderado del % bono de cada métrica que tenga meta cargada.
 // Vendedores (con cartera de venta propia): 33/33/33 entre logos / existentes / NRR.
 // CS puro (sin cartera de venta propia): 40% ventas existentes / 60% NRR — logos no les aplica.
-function liveObjectivePct(ob,realExistTCV,realLogoTCV,realNRR,canHaveLogos){
+// Excepción puntual por persona (OBJECTIVE_WEIGHTS_OVERRIDE): pisa esa ponderación default.
+const OBJECTIVE_WEIGHTS_OVERRIDE={'Jose María Imaz (Mono)':{logos:0.5,existing:0.25,nrr:0.25}};
+function liveObjectivePct(ob,realExistTCV,realLogoTCV,realNRR,canHaveLogos,o){
+  const w=OBJECTIVE_WEIGHTS_OVERRIDE[o];
   const parts=[];
   const cExist=completionPct(realExistTCV,ob.existing);
-  if(cExist!=null)parts.push({bono:bonoFromCumplimiento(cExist,'existing'),weight:canHaveLogos?1:0.4});
+  if(cExist!=null)parts.push({bono:bonoFromCumplimiento(cExist,'existing'),weight:w?w.existing:(canHaveLogos?1:0.4)});
   if(canHaveLogos){
     const cLogo=completionPct(realLogoTCV,ob.logos);
-    if(cLogo!=null)parts.push({bono:bonoFromCumplimiento(cLogo,'logos'),weight:1});
+    if(cLogo!=null)parts.push({bono:bonoFromCumplimiento(cLogo,'logos'),weight:w?w.logos:1});
   }
   const cNrr=completionPct(realNRR,ob.nrr);
-  if(cNrr!=null)parts.push({bono:bonoFromCumplimiento(cNrr,'nrr'),weight:canHaveLogos?1:0.6});
+  if(cNrr!=null)parts.push({bono:bonoFromCumplimiento(cNrr,'nrr'),weight:w?w.nrr:(canHaveLogos?1:0.6)});
   const totalW=parts.reduce((s,p)=>s+p.weight,0);
   if(!totalW)return null;
   return Math.round(parts.reduce((s,p)=>s+p.bono*p.weight,0)/totalW);
@@ -882,11 +885,14 @@ function bonoCurveTableHTML(){
   const rows=thresholds.map((th,i)=>`<tr><td>${th}%${th===100?'+':''}</td><td class="num">${BONO_CURVES.logos[i][1]}%</td><td class="num">${BONO_CURVES.existing[i][1]}%</td><td class="num">${BONO_CURVES.nrr[i][1]}%</td></tr>`).join('');
   return `<table class="lg-roles"><thead><tr><th>Cumplimiento real</th><th class="num">Logos nuevos</th><th class="num">Ventas existentes</th><th class="num">NRR</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
-function objectiveRulesHTML(canHaveLogos){
+function objectiveRulesHTML(canHaveLogos,o){
+  const w=OBJECTIVE_WEIGHTS_OVERRIDE[o];
+  const pesoTxt=w?`${Math.round(w.logos*100)}% N. ventas logos · ${Math.round(w.existing*100)}% N. ventas existentes · ${Math.round(w.nrr*100)}% NRR`
+    :(canHaveLogos?'33% N. ventas logos · 33% N. ventas existentes · 33% NRR':'40% N. ventas existentes · 60% NRR (no tenés objetivo de logos nuevos)');
   return `<details class="logo-group" style="margin-top:16px;text-align:left"><summary><span class="co">¿Cómo se calcula este %?</span><span class="lg-meta">reglas del incentivo</span></summary>
     <div style="padding:12px 14px;font-size:12.5px;line-height:1.6">
       <p><b>Candados</b> — hay que liberarlos para empezar a cobrar incentivos: 50% de cumplimiento en N. ventas existentes, y 75% en NRR. N. ventas logos no tiene candado propio. Mientras falte liberar alguno de los dos, el % total se muestra bloqueado en 0%, aunque alguna métrica ya esté alta.</p>
-      <p><b>Peso de cada objetivo en el total:</b> ${canHaveLogos?'33% N. ventas logos · 33% N. ventas existentes · 33% NRR':'40% N. ventas existentes · 60% NRR (no tenés objetivo de logos nuevos)'}.</p>
+      <p><b>Peso de cada objetivo en el total:</b> ${pesoTxt}.</p>
       <p><b>Cumplimiento real → % que aporta</b> (por tramos, no 1 a 1 — el real "entra" en el escalón más alto que no supera):</p>
       ${bonoCurveTableHTML()}
       <p class="muted" style="margin-top:8px">Ejemplo: si tu NRR real está al 91% de la meta, aporta 33% (el escalón de 90%, no un 91% a secas). Pasado el 100% no hay techo: aporta el % real tal cual. El total es el promedio ponderado de lo que aporta cada objetivo que tengas cargado (los candados liberados).</p>
@@ -905,7 +911,7 @@ function renderObjetivos(o){
   const salesDetail=newSalesBreakdown(rsList,[{label:q.label,idx:q.idx}]);
   const existDetail=salesDetail.filter(r=>r.tipo==='Existente'),logoDetail=salesDetail.filter(r=>r.tipo==='Logo nuevo');
   const lock=incentiveLock(ob,rs.existTCV,nrrCredit);
-  const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,nrrCredit,canHaveLogos);
+  const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,nrrCredit,canHaveLogos,o);
   const live=liveRaw==null?null:(lock.locked?0:liveRaw);
   const missing=[];if(!lock.existOk)missing.push('50% en N. ventas existentes');if(!lock.nrrOk)missing.push('75% en NRR');
   const lockNote=(liveRaw!=null&&lock.locked)?`<div class="pill end-now" style="margin-top:12px;display:inline-block;font-size:11px">🔒 Bloqueado — falta ${missing.join(' y ')} para empezar a cobrar incentivos</div>`:'';
@@ -919,7 +925,7 @@ function renderObjetivos(o){
         ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
         ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),nrrCredit,ob.nrr):''}
       </div>
-      ${objectiveRulesHTML(canHaveLogos)}
+      ${objectiveRulesHTML(canHaveLogos,o)}
     </div>`:`<div class="section-note" style="margin-top:0">Todavía no tenés objetivo cargado para ${q.label} — lo carga el admin en Proyecciones Q.</div>`;
   $('#panel').innerHTML=`<h2><span class="n">3</span>Objetivos · ${o} · ${q.label}</h2>
     <p class="sub">Cuánto llevás cumplido de tu meta, en vivo. Para el real por cuenta andá a Métricas; para cargar la proyección del Q, a Proyecciones Q.</p>
@@ -970,7 +976,7 @@ function renderObjetivosOrg(){
     const scored=rows.map(r=>{
       const canHaveLogos=r.inSales;
       const lock=incentiveLock(r.obj,r.realExistTCV,r.realNRR);
-      const liveRaw=liveObjectivePct(r.obj,r.realExistTCV,r.realLogoTCV,r.realNRR,canHaveLogos);
+      const liveRaw=liveObjectivePct(r.obj,r.realExistTCV,r.realLogoTCV,r.realNRR,canHaveLogos,r.o);
       if(liveRaw==null)return null;
       const overall=lock.locked?0:liveRaw;
       return{...r,overall,lock,canHaveLogos};
@@ -1254,7 +1260,7 @@ function renderComercial(o){
       // misma lógica que "Inicio" (BONO_CURVES + candados) — un solo cálculo de cumplimiento en toda
       // la app, no una versión simplificada acá y otra ahí.
       const lock=incentiveLock(ob,rs.existTCV,realNRRv);
-      const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,realNRRv,canHaveLogos);
+      const liveRaw=liveObjectivePct(ob,rs.existTCV,rs.logoTCV,realNRRv,canHaveLogos,o);
       const overall=liveRaw==null?null:(lock.locked?0:liveRaw);
       const missing=[];if(!lock.existOk)missing.push('50% en N. ventas existentes');if(!lock.nrrOk)missing.push('75% en NRR');
       const lockNote=(liveRaw!=null&&lock.locked)?`<div class="pill end-now" style="margin-top:8px;display:inline-block;font-size:11px">🔒 Bloqueado — falta ${missing.join(' y ')} para empezar a cobrar incentivos</div>`:'';
@@ -1264,7 +1270,7 @@ function renderComercial(o){
         ${ob.existing?meterRowDetail('N. ventas existentes'+(lock.existOk?'':' 🔒 candado 50%'),rs.existTCV,ob.existing,existDetail):''}
         ${canHaveLogos&&ob.logos?meterRowDetail('N. ventas logos',rs.logoTCV,ob.logos,logoDetail):''}
         ${ob.nrr?meterRow('NRR · revenue Q'+(lock.nrrOk?'':' 🔒 candado 75%'),realNRRv,ob.nrr):''}
-        ${liveRaw!=null?objectiveRulesHTML(canHaveLogos):''}`;
+        ${liveRaw!=null?objectiveRulesHTML(canHaveLogos,o):''}`;
     })():`<h3 style="margin-top:20px">Objetivos ${q.label}${isAdmin?' <span style="color:#888;font-weight:500;text-transform:none">· los setés vos</span>':''}</h3>
     <table class="objt">
       <tr><th>Objetivo</th><th>Meta</th><th>Proyectado</th><th></th></tr>
