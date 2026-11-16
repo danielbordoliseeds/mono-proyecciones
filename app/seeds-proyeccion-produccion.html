@@ -1829,7 +1829,7 @@ function newSalesBreakdown(list,buckets){
     // sin tener que ir a mirar la base.
     rows.push({client:c.client,vendedor:ownerOf(c.client).replace(' (Mono)',''),
       tipo:isEstablishedClient(c.client,sm)?'Existente':'Logo nuevo',tcv,
-      fechaVenta:c.ventaMes||(MONTHS[sm]&&MONTHS[sm].key)||''});
+      fechaVenta:c.ventaMes||(MONTHS[sm]&&MONTHS[sm].key)||'',oportunidad:c.oportunidad||''});
   });
   return rows.sort((a,b)=>b.tcv-a.tcv);
 }
@@ -1958,8 +1958,8 @@ function renderConsolidated(){
     <div class="section-note" style="margin-bottom:10px"><span class="pill" style="background:#D7F5E9;color:var(--green)">Existentes</span> &nbsp;<span class="pill end-soon">Logos nuevos</span> &nbsp;·&nbsp; TCV real (ticket mensual × duración total) de contratos que arrancaron a facturar en ese período — no lo que se tipeó como proyección, ni solo lo que ya facturó este Q.</div>
     <div class="card" style="padding:16px 18px;margin-top:0">${stackedBarSVG(salesData,SALES_SEGMENTS,'Todavía no hay nuevas ventas reales para este filtro.')}</div>
     ${salesRowsDet.length?`<details class="logo-group" style="margin-top:10px"><summary><span class="co">Detalle por cuenta</span><span class="lg-meta">${salesRowsDet.length} cuenta${salesRowsDet.length===1?'':'s'} · TCV del período completo que muestra el gráfico</span></summary>
-      <table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Tipo</th><th class="num">TCV</th></tr></thead><tbody>
-        ${salesRowsDet.map(r=>`<tr><td><b>${r.client}</b></td><td>${r.vendedor}</td><td>${r.tipo}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
+      <table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Oportunidad</th><th>Tipo</th><th class="num">TCV</th></tr></thead><tbody>
+        ${salesRowsDet.map(r=>`<tr><td><b>${r.client}</b></td><td>${r.vendedor}</td><td>${r.oportunidad||'<span class="muted">—</span>'}</td><td>${r.tipo}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
       </tbody></table></details>`:''}
     <div class="kpis" style="margin-top:20px">
       ${kpi('Nuevas ventas · existentes',fmt(tExist),'TCV proyectado','up')}
@@ -2121,8 +2121,8 @@ function meterRow(label,real,meta,compact){
 // tabla de detalle (cuenta/vendedor/TCV) para un desplegable "ver detalle" — una sola plantilla, la
 // use el meterRow de una persona o la tabla de "Objetivo de la empresa" en Consolidado.
 function salesDetailTableHTML(rows){
-  return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Venta</th><th class="num">TCV</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td>${r.fechaVenta||'—'}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
+  return rows&&rows.length?`<table class="lg-roles"><thead><tr><th>Cuenta</th><th>Vendedor</th><th>Oportunidad</th><th>Venta</th><th class="num">TCV</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${r.client}</td><td>${r.vendedor}</td><td>${r.oportunidad||'<span class="muted">—</span>'}</td><td>${r.fechaVenta||'—'}</td><td class="num">${fmt(r.tcv)}</td></tr>`).join('')}
     </tbody></table>`:'<p class="muted" style="margin:0">Sin ventas de este tipo en el Q.</p>';
 }
 // mismo patrón que salesDetailTableHTML pero para revenue por cuenta (accountBreakdown): cuenta/contratos/revenue

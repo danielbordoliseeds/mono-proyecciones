@@ -49,8 +49,11 @@ export const SQL = `
   )
   select ps.id as ps_id, trim(ps."clientName") as client, ps."clientId" as client_id, ps.type as ctype, nullif(trim(ps."seederRole"), '') as role,
     trim(regexp_replace(ps."seederLastName" || ' ' || ps."seederFirstName", '\\s+', ' ', 'g')) as person,
+    min(nullif(trim(sr.title), '')) as oportunidad,
     json_object_agg(nr.m, round(nr.usd::numeric, 2)) as by_month
   from nr join planted_seeders ps on ps.id = nr.ps_id and ps."deletedAt" is null
+  left join staffing_candidates sc on sc.id = ps."staffingCandidateId"
+  left join staffing_requests sr on sr.id = sc."staffingRequestId"
   group by ps.id`;
 
 // Mes en que se VENDIÓ cada planted seeder (oferta firmada por cliente y talento — no el primer mes que
@@ -137,9 +140,10 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     const own = ownersByName.get(client) || ownersById.get(r.client_id) || {};
     const c = byKey.get(k) || {
       client, ctype: r.ctype, person, series: months.map(() => 0),
-      vendedor: toolName(own.vendedor), cs: toolName(own.cs), roles: new Set(),
+      vendedor: toolName(own.vendedor), cs: toolName(own.cs), roles: new Set(), oportunidades: new Set(),
     };
     if (r.role) c.roles.add(r.role);
+    if (r.oportunidad) c.oportunidades.add(r.oportunidad);
     months.forEach((m, i) => (c.series[i] = Math.round((c.series[i] + Number(r.by_month[m] ?? 0)) * 100) / 100));
     // mes de venta: el más reciente entre los planted seeders que se consolidan en este mismo
     // contrato (mismo cliente + persona + tipo) — una re-contratación años después de un contrato
@@ -164,16 +168,17 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     const own = ownersByName.get(client) || ownersById.get(f.client_id) || {};
     const c = byKey.get(k) || {
       client, ctype: "FTE", person, series: months.map(() => 0),
-      vendedor: toolName(own.vendedor), cs: toolName(own.cs), roles: new Set(),
+      vendedor: toolName(own.vendedor), cs: toolName(own.cs), roles: new Set(), oportunidades: new Set(),
     };
-    if (f.role) c.roles.add(f.role);
+    // en el FTE, el "role" YA es el título de la búsqueda (ver SQL_FTE) — mismo valor.
+    if (f.role) { c.roles.add(f.role); c.oportunidades.add(f.role); }
     c.series[mi] = Math.round((c.series[mi] + Number(f.fee_usd)) * 100) / 100;
     if (!c.ventaMes || f.venta_mes > c.ventaMes) c.ventaMes = f.venta_mes;
     byKey.set(k, c);
   }
   const contracts = [...byKey.values()]
     .filter((c) => c.series.some((v) => v !== 0))
-    .map(({ roles, ...c }) => ({ ...c, role: [...roles].join(" / ") || null }))
+    .map(({ roles, oportunidades, ...c }) => ({ ...c, role: [...roles].join(" / ") || null, oportunidad: [...oportunidades].join(" / ") || null }))
     .sort((a, b) => a.client.localeCompare(b.client) || a.person.localeCompare(b.person));
   return { row: { quarter: "dataset", months, contracts, uploaded_by: null, created_at: new Date().toISOString() }, sinTc };
 }
