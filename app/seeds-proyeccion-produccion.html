@@ -518,7 +518,9 @@ function realSales(list,q){
   // TCV ("ventas nuevas"): a qué Q pertenece la venta — por fecha de VENTA (saleMonthIdx: oferta firmada
   // por ambas partes), no por cuándo arranca a facturar. Una oferta firmada en septiembre que arranca a
   // facturar en octubre cuenta como venta de Q3, no de Q4 — aunque el billing real caiga en Q4.
-  list.filter(c=>q.idx.includes(saleMonthIdx(c))).forEach(c=>{
+  // un reemplazo (c.reemplazo) no es venta nueva: sigue facturando igual, solo cambió quién ocupa el
+  // puesto — sí entra en existQ/logoQ de abajo (es revenue real), pero no acá.
+  list.filter(c=>q.idx.includes(saleMonthIdx(c))&&!c.reemplazo).forEach(c=>{
     const sm=saleMonthIdx(c);const tcv=tcvOf(c);
     if(isEstablishedClient(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
   });
@@ -1630,7 +1632,7 @@ function suggestNRR(o){
 function velocity(list,q){
   const pi=QUARTERS.findIndex(x=>x.id===q.id);let sum=0,cnt=0,n=0;
   for(let k=pi-1;k>=Math.max(0,pi-3);k--){const qq=QUARTERS[k];
-    const news=list.filter(c=>qq.idx.includes(saleMonthIdx(c)));sum+=sumQ(news,qq);cnt+=news.length;n++;}
+    const news=list.filter(c=>qq.idx.includes(saleMonthIdx(c))&&!c.reemplazo);sum+=sumQ(news,qq);cnt+=news.length;n++;}
   return{avg:n?sum/n:0,cnt:n?Math.round(cnt/n):0,n};
 }
 function opportunities(list,q,prev){
@@ -1787,7 +1789,9 @@ function newSalesSeries(list,buckets){
   return buckets.map(b=>{
     let existTCV=0,logoTCV=0;
     // por fecha de venta (saleMonthIdx), no por primer mes que factura — ver nota en realSales()
-    list.filter(c=>{const sm=saleMonthIdx(c);return sm>=0&&b.idx.includes(sm);}).forEach(c=>{
+    // un reemplazo (c.reemplazo) sigue facturando y cuenta en revenue/NRR normal, pero no es venta
+    // nueva: no hay TCV incremental, solo cambió quién ocupa el puesto.
+    list.filter(c=>{const sm=saleMonthIdx(c);return sm>=0&&b.idx.includes(sm)&&!c.reemplazo;}).forEach(c=>{
       const sm=saleMonthIdx(c);const tcv=tcvOf(c);
       if(isEstablishedClient(c.client,sm))existTCV+=tcv;else logoTCV+=tcv;
     });
@@ -1823,6 +1827,7 @@ function newSalesBreakdown(list,buckets){
   const allIdx=[...new Set(buckets.flatMap(b=>b.idx))];
   const rows=[];
   list.forEach(c=>{
+    if(c.reemplazo)return; // sigue facturando como siempre, pero no es venta nueva (ver newSalesSeries)
     const sm=saleMonthIdx(c);if(sm<0||!allIdx.includes(sm))return;
     const tcv=tcvOf(c);if(!tcv)return;
     // fechaVenta visible en el detalle — para poder ver a ojo por qué algo clasifica como clasifica,

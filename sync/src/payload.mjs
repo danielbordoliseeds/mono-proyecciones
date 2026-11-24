@@ -78,10 +78,15 @@ export const SQL_VENTA = `
           from staffing_candidate_status_logs l where l."staffingCandidateId" = ps."staffingCandidateId"
         ) end
       ), 'YYYY-MM'
-    ) as venta_mes
+    ) as venta_mes,
+    -- reemplazo de un talento saliente (staffing_requests.seederToReplace): no es revenue incremental,
+    -- no cuenta como venta nueva (ver buildPayload/newSalesSeries), solo sigue siendo revenue normal.
+    bool_or(sr."seederToReplace" is not null) as es_reemplazo
   from planted_seeders ps
   left join offers o on o."plantedSeederId" = ps.id and o."deletedAt" is null
   left join firma_offer fo on fo.offer_id = o.id
+  left join staffing_candidates sc on sc.id = ps."staffingCandidateId"
+  left join staffing_requests sr on sr.id = sc."staffingRequestId"
   where ps."deletedAt" is null
   group by ps.id`;
 
@@ -93,6 +98,7 @@ export const SQL_FTE = `
   select sc.id as sc_id, trim(cl.client) as client, cl.id as client_id,
     trim(regexp_replace(sd."firstName" || ' ' || sd."lastName", '\\s+', ' ', 'g')) as person,
     trim(sr.title) as role, to_char(f.contratado, 'YYYY-MM') as venta_mes,
+    (sr."seederToReplace" is not null) as es_reemplazo,
     round((${amtToUsd('sc."fteFee"', 'sc."fteFeeCurrency"', "f.contratado")})::numeric, 2) as fee_usd
   from staffing_candidates sc
   join seeders sd on sd.id = sc."seederId"
@@ -129,7 +135,7 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
   // La dupla de un cliente agrupado (Quilmes → AB InBev) es la del cliente del grupo.
   const ownersByName = new Map(owners.map((o) => [o.client, o]));
   const ownersById = new Map(owners.map((o) => [o.id, o]));
-  const ventaByPsId = new Map(ventas.map((v) => [v.ps_id, v.venta_mes]));
+  const ventaByPsId = new Map(ventas.map((v) => [v.ps_id, v]));
   const byKey = new Map();
   const sinTc = [];
   for (const r of rows) {
@@ -149,8 +155,8 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     // contrato (mismo cliente + persona + tipo) — una re-contratación años después de un contrato
     // viejo se consolida en la misma fila (mismo cliente/persona/tipo), y lo relevante para "a qué Q
     // pertenece esta venta" es la firma más nueva, no la original de hace años.
-    const vm = ventaByPsId.get(r.ps_id);
-    if (vm && (!c.ventaMes || vm > c.ventaMes)) c.ventaMes = vm;
+    const venta = ventaByPsId.get(r.ps_id);
+    if (venta?.venta_mes && (!c.ventaMes || venta.venta_mes > c.ventaMes)) { c.ventaMes = venta.venta_mes; c.reemplazo = !!venta.es_reemplazo; }
     byKey.set(k, c);
   }
   // FTE (DIRECT_HIRING): fee único, no revenue mensual — se carga como contrato ctype "FTE" con el fee
@@ -173,12 +179,12 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     // en el FTE, el "role" YA es el título de la búsqueda (ver SQL_FTE) — mismo valor.
     if (f.role) { c.roles.add(f.role); c.oportunidades.add(f.role); }
     c.series[mi] = Math.round((c.series[mi] + Number(f.fee_usd)) * 100) / 100;
-    if (!c.ventaMes || f.venta_mes > c.ventaMes) c.ventaMes = f.venta_mes;
+    if (!c.ventaMes || f.venta_mes > c.ventaMes) { c.ventaMes = f.venta_mes; c.reemplazo = !!f.es_reemplazo; }
     byKey.set(k, c);
   }
   const contracts = [...byKey.values()]
     .filter((c) => c.series.some((v) => v !== 0))
-    .map(({ roles, oportunidades, ...c }) => ({ ...c, role: [...roles].join(" / ") || null, oportunidad: [...oportunidades].join(" / ") || null }))
+    .map(({ roles, oportunidades, ...c }) => ({ ...c, role: [...roles].join(" / ") || null, oportunidad: [...oportunidades].join(" / ") || null, reemplazo: !!c.reemplazo }))
     .sort((a, b) => a.client.localeCompare(b.client) || a.person.localeCompare(b.person));
   return { row: { quarter: "dataset", months, contracts, uploaded_by: null, created_at: new Date().toISOString() }, sinTc };
 }
