@@ -510,7 +510,11 @@ function isEstablishedClient(client,atIdx){
 // en vez de 23.792). La serie ya trae cada mes del contrato con su monto real (el primero prorrateado,
 // el resto al ticket pleno), así que sumarla tal cual es el TCV correcto — no hace falta reconstruir
 // nada a partir de un solo mes.
+// c.tcv (del sync) = la serie + los meses que caen después de la ventana cargada (un Seeds Hire de 18
+// meses firmado en nov-26 termina en 2028) — la serie sola lo corta. Sin
+// tcv (dato viejo, sync sin este campo todavía), cae a sumar la serie como antes.
 function tcvOf(c){
+  if(c.tcv!=null)return c.tcv;
   return c.series.reduce((a,v)=>a+(v>0?v:0),0);
 }
 function realSales(list,q){

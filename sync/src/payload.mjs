@@ -38,8 +38,7 @@ const legs = (table, a, sign) => `
   select o."plantedSeederId" as ps_id, to_char(${a}."invoiceDate", 'YYYY-MM') as m, ${sign} * ${toUsd(a)} as usd
   from offers o join ${table} ${a} on ${a}."offerId" = o.id
   where o."deletedAt" is null and o.status = 'A'
-    and ${a}."deletedAt" is null and ${a}.status <> 'C'
-    and to_char(${a}."invoiceDate", 'YYYY-MM') between $1 and $2`;
+    and ${a}."deletedAt" is null and ${a}.status <> 'C'`;
 
 // Parámetros: $1 = primer mes, $2 = último mes (AAAA-MM).
 export const SQL = `
@@ -50,11 +49,16 @@ export const SQL = `
   select ps.id as ps_id, trim(ps."clientName") as client, ps."clientId" as client_id, ps.type as ctype, nullif(trim(ps."seederRole"), '') as role,
     trim(regexp_replace(ps."seederLastName" || ' ' || ps."seederFirstName", '\\s+', ' ', 'g')) as person,
     min(nullif(trim(sr.title), '')) as oportunidad,
-    json_object_agg(nr.m, round(nr.usd::numeric, 2)) as by_month
+    json_object_agg(nr.m, round(nr.usd::numeric, 2)) filter (where nr.m between $1 and $2) as by_month,
+    -- net revenue de los meses DESPUÉS de la ventana (un Seeds Hire de 18 meses firmado en nov-26 termina
+    -- en 2028 y su serie queda cortada): se suma al TCV en buildPayload. Solo meses positivos, igual
+    -- que tcvOf con la serie; los meses sin TC no suman.
+    round(coalesce(sum(nr.usd) filter (where nr.m > $2 and nr.usd > 0), 0)::numeric, 2) as tcv_post
   from nr join planted_seeders ps on ps.id = nr.ps_id and ps."deletedAt" is null
   left join staffing_candidates sc on sc.id = ps."staffingCandidateId"
   left join staffing_requests sr on sr.id = sc."staffingRequestId"
-  group by ps.id`;
+  group by ps.id
+  having bool_or(nr.m between $1 and $2)`;
 
 // Mes en que se VENDIÓ cada planted seeder (oferta firmada por cliente y talento — no el primer mes que
 // factura): para que una oferta aceptada en septiembre pero que arranca a facturar en octubre cuente
@@ -151,6 +155,7 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
     if (r.role) c.roles.add(r.role);
     if (r.oportunidad) c.oportunidades.add(r.oportunidad);
     months.forEach((m, i) => (c.series[i] = Math.round((c.series[i] + Number(r.by_month[m] ?? 0)) * 100) / 100));
+    c.tcvPost = (c.tcvPost || 0) + Number(r.tcv_post ?? 0);
     // mes de venta: el más reciente entre los planted seeders que se consolidan en este mismo
     // contrato (mismo cliente + persona + tipo) — una re-contratación años después de un contrato
     // viejo se consolida en la misma fila (mismo cliente/persona/tipo), y lo relevante para "a qué Q
@@ -184,7 +189,9 @@ export function buildPayload(rows, months, prevContracts = [], owners = [], vent
   }
   const contracts = [...byKey.values()]
     .filter((c) => c.series.some((v) => v !== 0))
-    .map(({ roles, oportunidades, ...c }) => ({ ...c, role: [...roles].join(" / ") || null, oportunidad: [...oportunidades].join(" / ") || null, reemplazo: !!c.reemplazo }))
+    // tcv: lo que suma tcvOf con la serie (meses positivos) + los meses posteriores a la ventana
+    .map(({ roles, oportunidades, tcvPost, ...c }) => ({ ...c,
+      tcv: Math.round((c.series.reduce((a, v) => a + (v > 0 ? v : 0), 0) + (tcvPost || 0)) * 100) / 100, role: [...roles].join(" / ") || null, oportunidad: [...oportunidades].join(" / ") || null, reemplazo: !!c.reemplazo }))
     .sort((a, b) => a.client.localeCompare(b.client) || a.person.localeCompare(b.person));
   return { row: { quarter: "dataset", months, contracts, uploaded_by: null, created_at: new Date().toISOString() }, sinTc };
 }
