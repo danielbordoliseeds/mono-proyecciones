@@ -555,7 +555,13 @@ function totalChurn(o,base){const spec=churnLost(o);const ant=churnPct()/100*Mat
 function activeAccounts(){
   const bq=baseQ()||projQ();const by={};
   CONTRACTS.forEach(c=>{const v=bq.idx.reduce((a,i)=>a+c.series[i],0);by[c.client]=(by[c.client]||0)+v;});
-  return new Set(Object.keys(by).filter(k=>by[k]>0));
+  const act=new Set(Object.keys(by).filter(k=>by[k]>0));
+  // una cuenta que no facturó en el Q base pero tiene una venta en el Q proyectado (cliente que vuelve,
+  // ej. Pernod Ricard) también es activa — si no, salesContractsFor la descarta y esa venta nunca llega
+  // a realSales ni a los objetivos del vendedor
+  const q=projQ();
+  if(q)CONTRACTS.forEach(c=>{if(q.idx.includes(saleMonthIdx(c)))act.add(c.client);});
+  return act;
 }
 // cartera de retención (base, extensiones, bajas): cuentas donde es CS, o vendedor si la cuenta no tiene CS
 function contractsFor(comercial,activeSet){
